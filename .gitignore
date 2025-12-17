@@ -1,0 +1,90 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Backend
+backend/node_modules/
+backend/npm-debug.log*
+backend/yarn-debug.log*
+backend/yarn-error.log*
+backend/logs/
+backend/.DS_Store
+backend/dist/
+backend/build/
+
+# Mobile
+mobile_app/.dart_tool/
+mobile_app/build/
+mobile_app/.packages
+mobile_app/pubspec.lock
+mobile_app/.flutter-plugins
+mobile_app/.flutter-plugins-dependencies
+mobile_app/.idea/
+mobile_app/.vscode/
+mobile_app/.DS_Store
+mobile_app/*.apk
+mobile_app/*.aab
+mobile_app/*.ipa
+mobile_app/.gradle/
+mobile_app/android/app/release/
+mobile_app/android/app/debug/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+postgres_data/
+
+# OS
+Thumbs.db
+.DS_Store
+*.log
+
+# Sensitive files
+*.key
+*.pem
+*.p12
+secrets.json
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+
+# Backups
+backup/
+backups/
+*.backup
+
+# Documentation build files
+site/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Node version manager
+.nvmrc
+.node-version
+
+# Miscellaneous
+.directory
+.recently-used.xbel
+
+# Generated files (not always)
+# lib/models/user.freezed.dart
+# lib/models/user.g.dart
