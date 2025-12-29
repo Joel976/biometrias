@@ -130,13 +130,24 @@ class _RegisterScreenState extends State<RegisterScreen>
           final validationResult = await _earValidator.validateEar(result);
 
           if (!validationResult.isValid) {
+            final errorMsg =
+                validationResult.error ??
+                '⚠️ La imagen no parece ser una oreja válida. '
+                    'Confianza: ${validationResult.confidencePercentage}. '
+                    'Por favor, intenta de nuevo asegurándote de capturar tu oreja claramente.';
+
             setState(() {
               _isLoading = false;
-              _errorMessage =
-                  validationResult.error ??
-                  '⚠️ La imagen no parece ser una oreja válida. '
-                      'Confianza: ${validationResult.confidencePercentage}. '
-                      'Por favor, intenta de nuevo asegurándote de capturar tu oreja claramente.';
+              _errorMessage = errorMsg;
+            });
+
+            // ⏱️ Limpiar el mensaje después de 5 segundos
+            Future.delayed(Duration(seconds: 5), () {
+              if (mounted && _errorMessage == errorMsg) {
+                setState(() {
+                  _errorMessage = null;
+                });
+              }
             });
 
             ScaffoldMessenger.of(context).showSnackBar(

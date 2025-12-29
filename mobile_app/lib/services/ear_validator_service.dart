@@ -16,7 +16,8 @@ class EarValidatorService {
   static const int _inputWidth = 224;
   static const int _inputHeight = 224;
   static const int _numChannels = 3;
-  static const double _confidenceThreshold = 0.7; // 70% de confianza mínima
+  static const double _confidenceThreshold =
+      0.65; // 65% de confianza mínima (como tu código original)
 
   /// Inicializar el intérprete de TensorFlow Lite
   Future<void> initialize() async {
@@ -71,28 +72,78 @@ class EarValidatorService {
       // 3. Convertir imagen a tensor (normalizado 0-1)
       var input = _imageToTensor(resized);
 
-      // 4. Preparar output (asumiendo clasificación binaria: [no_oreja, oreja])
-      var output = List.filled(1 * 2, 0.0).reshape([1, 2]);
+      // 4. Preparar output - IMPORTANTE: Debe coincidir con el shape del modelo
+      // Si tu modelo retorna [1, 3], significa 3 clases
+      var output = List.filled(1 * 3, 0.0).reshape([1, 3]);
 
       // 5. Ejecutar inferencia
       _interpreter!.run(input, output);
 
-      // 6. Obtener probabilidad de que sea una oreja (índice 1)
-      double earProbability = output[0][1];
-      bool isEar = earProbability >= _confidenceThreshold;
+      // 6. Obtener probabilidades de cada clase
+      // CLASES DEL MODELO (ORDEN REAL basado en tu código anterior):
+      // Clase 0: oreja_clara
+      // Clase 1: oreja_borrosa
+      // Clase 2: no_oreja
+      double orejaClaraProb = output[0][0];
+      double orejaBorrosaProb = output[0][1];
+      double noOrejaProb = output[0][2];
 
       print(
-        '[EarValidator] 🎯 Resultado: ${isEar ? "ES OREJA" : "NO ES OREJA"}',
-      );
-      print(
-        '[EarValidator] 📊 Confianza: ${(earProbability * 100).toStringAsFixed(2)}%',
+        '[EarValidator] 📊 Probabilidades RAW: '
+        'oreja_clara=${(orejaClaraProb * 100).toStringAsFixed(1)}%, '
+        'oreja_borrosa=${(orejaBorrosaProb * 100).toStringAsFixed(1)}%, '
+        'no_oreja=${(noOrejaProb * 100).toStringAsFixed(1)}%',
       );
 
-      return EarDetectionResult(
-        isEar: isEar,
-        confidence: earProbability,
-        error: null,
+      // Verificar que las probabilidades sumen ~1.0 (modelo bien calibrado)
+      double suma = orejaClaraProb + orejaBorrosaProb + noOrejaProb;
+      print(
+        '[EarValidator] 🔢 Suma de probabilidades: ${suma.toStringAsFixed(3)}',
       );
+
+      // Encontrar la clase con mayor probabilidad
+      double maxProb = orejaClaraProb;
+      String claseMax = 'oreja_clara';
+
+      if (orejaBorrosaProb > maxProb) {
+        maxProb = orejaBorrosaProb;
+        claseMax = 'oreja_borrosa';
+      }
+      if (noOrejaProb > maxProb) {
+        maxProb = noOrejaProb;
+        claseMax = 'no_oreja';
+      }
+
+      print(
+        '[EarValidator] 🏆 Clase ganadora: $claseMax (${(maxProb * 100).toStringAsFixed(1)}%)',
+      );
+
+      // VALIDACIÓN ESTRICTA:
+      // ✅ SOLO acepta si es "oreja_clara" con confianza >= 65%
+      // ❌ Rechaza: oreja_borrosa, no_oreja, objetos random
+      bool isEar =
+          (claseMax == 'oreja_clara') && (maxProb >= _confidenceThreshold);
+
+      print(
+        '[EarValidator] 🎯 Resultado: ${isEar ? "✅ ES OREJA CLARA" : "❌ RECHAZADO"}',
+      );
+      print(
+        '[EarValidator] 📊 Confianza final: ${(maxProb * 100).toStringAsFixed(2)}%',
+      );
+
+      if (!isEar && claseMax == 'oreja_borrosa') {
+        print(
+          '[EarValidator] ⚠️ Razón: Oreja borrosa detectada (requiere foto más clara)',
+        );
+      } else if (!isEar && claseMax == 'no_oreja') {
+        print('[EarValidator] ⚠️ Razón: No se detectó una oreja en la imagen');
+      } else if (!isEar && maxProb < _confidenceThreshold) {
+        print(
+          '[EarValidator] ⚠️ Razón: Confianza insuficiente (${(maxProb * 100).toStringAsFixed(1)}% < ${(_confidenceThreshold * 100).toStringAsFixed(0)}%)',
+        );
+      }
+
+      return EarDetectionResult(isEar: isEar, confidence: maxProb, error: null);
     } catch (e) {
       print('[EarValidator] ❌ Error en validación: $e');
       return EarDetectionResult(

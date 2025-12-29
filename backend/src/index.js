@@ -8,6 +8,8 @@ const morgan = require('morgan');
 const authRoutes = require('./routes/authRoutes');
 const syncRoutes = require('./routes/syncRoutes');
 const biometriaRoutes = require('./routes/biometriaRoutes');
+const auditRoutes = require('./routes/auditRoutes');
+const { middlewareAuditoria } = require('./middleware/auditoria');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +18,9 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(compression());
 app.use(morgan('dev'));
+
+// Middleware de auditoría (NUEVO - registra todas las acciones)
+app.use(middlewareAuditoria);
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true
@@ -38,6 +43,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/biometria', biometriaRoutes);
+app.use('/api/audit', auditRoutes);
 
 // Manejo de errores 404
 app.use((req, res) => {

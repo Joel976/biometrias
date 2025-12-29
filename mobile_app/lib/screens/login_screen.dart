@@ -100,13 +100,24 @@ class _LoginScreenState extends State<LoginScreen> {
         final validationResult = await _earValidator.validateEar(photoBytes);
 
         if (!validationResult.isValid) {
+          final errorMsg =
+              validationResult.error ??
+              '⚠️ La imagen no parece ser una oreja válida. '
+                  'Confianza: ${validationResult.confidencePercentage}. '
+                  'Por favor, intenta de nuevo.';
+
           setState(() {
             _isLoading = false;
-            _errorMessage =
-                validationResult.error ??
-                '⚠️ La imagen no parece ser una oreja válida. '
-                    'Confianza: ${validationResult.confidencePercentage}. '
-                    'Por favor, intenta de nuevo.';
+            _errorMessage = errorMsg;
+          });
+
+          // ⏱️ Limpiar el mensaje después de 5 segundos
+          Future.delayed(Duration(seconds: 5), () {
+            if (mounted && _errorMessage == errorMsg) {
+              setState(() {
+                _errorMessage = null;
+              });
+            }
           });
 
           ScaffoldMessenger.of(context).showSnackBar(

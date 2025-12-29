@@ -1,4 +1,4 @@
-name: biometrics_app
+name: biometric_auth
 description: "Aplicación móvil de autenticación biométrica multiplataforma"
 publish_to: 'none'
 

@@ -7,8 +7,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:biometrics_app/main.dart';
-import 'package:biometrics_app/models/admin_settings.dart';
+import 'package:biometric_auth/main.dart';
+import 'package:biometric_auth/models/admin_settings.dart';
 
 void main() {
   testWidgets('App loads with default settings', (WidgetTester tester) async {

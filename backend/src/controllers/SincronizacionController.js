@@ -339,7 +339,7 @@ class SincronizacionController {
   static async confirmarSync(req, res) {
     try {
       const { id_usuario } = req.user;
-      const { ids_cola } = req.body;
+      const { ids_cola, dispositivo_id } = req.body;
 
       if (!Array.isArray(ids_cola)) {
         return res.status(400).json({
@@ -348,11 +348,61 @@ class SincronizacionController {
         });
       }
 
+      // Importar el servicio de banderas
+      const SyncFlagsService = require('../services/SyncFlagsService');
+
+      // Obtener detalles de elementos en cola antes de confirmar
+      const itemsSincronizados = [];
+      
       for (const id_cola of ids_cola) {
+        // Obtener detalles del item de la cola
+        const detalleQuery = await pool.query(
+          `SELECT tipo_entidad, id_entidad FROM cola_sincronizacion 
+           WHERE id_cola = $1 AND id_usuario = $2`,
+          [id_cola, id_usuario]
+        );
+
+        if (detalleQuery.rows.length > 0) {
+          const { tipo_entidad, id_entidad } = detalleQuery.rows[0];
+          itemsSincronizados.push({
+            entidad: tipo_entidad,
+            idEntidad: id_entidad
+          });
+        }
+
+        // Actualizar estado en cola
         await pool.query(
           'UPDATE cola_sincronizacion SET estado = $1 WHERE id_cola = $2 AND id_usuario = $3',
           ['enviado', id_cola, id_usuario]
         );
+      }
+
+      // Marcar elementos como sincronizados si se proporciona dispositivo_id
+      if (dispositivo_id && itemsSincronizados.length > 0) {
+        console.log(`[SYNC] Marcando ${itemsSincronizados.length} elementos como sincronizados...`);
+        
+        const resultados = await SyncFlagsService.marcarLoteComoSincronizado(
+          itemsSincronizados,
+          dispositivo_id
+        );
+
+        // Crear checkpoint automático después de sincronización exitosa
+        if (resultados.exitosos > 0) {
+          await SyncFlagsService.crearCheckpoint(
+            id_usuario,
+            dispositivo_id,
+            null, // nombre automático
+            `Sincronización automática: ${resultados.exitosos} elementos`
+          );
+        }
+
+        return res.json({
+          success: true,
+          confirmados: ids_cola.length,
+          sincronizados: resultados.exitosos,
+          fallidos: resultados.fallidos,
+          detalles: resultados.detalles
+        });
       }
 
       res.json({

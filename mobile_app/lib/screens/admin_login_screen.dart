@@ -88,32 +88,61 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         title: Row(
           children: [
             Icon(Icons.info_outline, color: Colors.blue),
-            SizedBox(width: 12),
-            Text('Credenciales por Defecto'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Para modo de desarrollo/testing:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 12),
-            _buildCredentialRow('Contraseña', 'admin'),
-            SizedBox(height: 8),
-            _buildCredentialRow('Clave Secreta', 'password'),
-            SizedBox(height: 16),
-            Text(
-              '⚠️ Cambiar estas credenciales en producción',
-              style: TextStyle(
-                color: Colors.orange,
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Credenciales por Defecto',
+                style: TextStyle(fontSize: 18),
               ),
             ),
           ],
+        ),
+        contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 0),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Para modo de desarrollo/testing:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 12),
+              _buildCredentialRow('Contraseña', 'admin'),
+              SizedBox(height: 8),
+              _buildCredentialRow('Clave Secreta', 'password'),
+              SizedBox(height: 16),
+              Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.warning_amber,
+                      color: Colors.orange.shade700,
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Cambiar estas credenciales en producción',
+                        style: TextStyle(
+                          color: Colors.orange.shade700,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -126,22 +155,31 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }
 
   Widget _buildCredentialRow(String label, String value) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('$label: ', style: TextStyle(fontWeight: FontWeight.w500)),
-        Expanded(
-          child: Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              value,
-              style: TextStyle(
-                fontFamily: 'Courier',
-                fontWeight: FontWeight.bold,
-              ),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 13,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            value,
+            style: TextStyle(
+              fontFamily: 'Courier',
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
             ),
           ),
         ),

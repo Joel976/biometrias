@@ -79,7 +79,7 @@ class _BiometricAppState extends State<BiometricApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Autenticación Biométrica',
+      title: 'BiometricAuth',
 
       // Tema claro
       theme: ThemeData(

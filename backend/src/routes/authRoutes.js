@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const AuthController = require('../controllers/AuthController');
 const { authenticateToken, refreshToken } = require('../middleware/auth');
+const { middlewareAuditoriaLogin } = require('../middleware/auditoria');
 
-// Rutas públicas
+// Rutas publicas
 router.post('/register', AuthController.register);
-router.post('/login', AuthController.loginBiometrico);
-router.post('/login-basico', AuthController.loginBasico);
+router.post('/login', middlewareAuditoriaLogin, AuthController.loginBiometrico);
+router.post('/login-basico', middlewareAuditoriaLogin, AuthController.loginBasico);
 router.post('/refresh-token', refreshToken);
 
 // Rutas de biometría (registro y verificación)

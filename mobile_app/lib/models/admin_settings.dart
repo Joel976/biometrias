@@ -46,7 +46,7 @@ class AdminSettings {
     this.minPhotoQuality = 70,
     this.audioRecordingDuration = 5,
     this.allowMultipleRegistrations = true,
-    this.enableEarValidation = false, // Deshabilitado por defecto
+    this.enableEarValidation = true, // ✅ HABILITADO para testing
   });
 
   /// Convertir a Map para guardar en storage
