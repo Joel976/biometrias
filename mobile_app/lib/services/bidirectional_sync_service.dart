@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -6,6 +7,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../config/api_config.dart';
 import '../services/local_database_service.dart';
 import '../services/offline_sync_service.dart';
+import '../services/biometric_backend_service.dart';
 import '../models/biometric_models.dart';
 
 /// Servicio de sincronización bidireccional
@@ -15,6 +17,7 @@ class BidirectionalSyncService {
   final Dio _dio;
   final LocalDatabaseService _localDb;
   final OfflineSyncService _offlineSync;
+  final BiometricBackendService _biometricBackend;
   final FlutterSecureStorage _storage;
   final Connectivity _connectivity;
 
@@ -36,6 +39,7 @@ class BidirectionalSyncService {
     Dio? dio,
     LocalDatabaseService? localDb,
     OfflineSyncService? offlineSync,
+    BiometricBackendService? biometricBackend,
     FlutterSecureStorage? storage,
     Connectivity? connectivity,
   }) : _dio =
@@ -49,6 +53,7 @@ class BidirectionalSyncService {
            ),
        _localDb = localDb ?? LocalDatabaseService(),
        _offlineSync = offlineSync ?? OfflineSyncService(),
+       _biometricBackend = biometricBackend ?? BiometricBackendService(),
        _storage = storage ?? const FlutterSecureStorage(),
        _connectivity = connectivity ?? Connectivity() {
     // Verificar conectividad inicial
@@ -128,19 +133,60 @@ class BidirectionalSyncService {
 
       for (final item in pendingData) {
         try {
-          final response = await _dio.post(
-            item.endpoint,
-            data: {
-              ...item.data,
-              'photo_base64': item.photoBase64,
-              'audio_base64': item.audioBase64,
-            },
-            options: Options(
-              headers: {'Authorization': 'Bearer ${await _getToken()}'},
-            ),
-          );
+          bool success = false;
 
-          if (response.statusCode == 200 || response.statusCode == 201) {
+          // Determinar qué servicio usar según el endpoint
+          if (item.endpoint == '/registrar_usuario') {
+            // Registro de usuario
+            await _biometricBackend.registrarUsuario(
+              identificadorUnico: item.data['identificador_unico'] ?? '',
+              nombres: item.data['nombres'] ?? '',
+              apellidos: item.data['apellidos'] ?? '',
+              fechaNacimiento: item.data['fecha_nacimiento'],
+              sexo: item.data['sexo'],
+            );
+            success = true;
+          } else if (item.endpoint == '/oreja/registrar') {
+            // Registro de biometría de oreja
+            if (item.photoBase64 != null) {
+              final photoBytes = Uint8List.fromList(
+                item.photoBase64!.codeUnits,
+              );
+              await _biometricBackend.registrarBiometriaOreja(
+                identificador: item.data['identificador_unico'] ?? '',
+                imagenes: [photoBytes],
+              );
+              success = true;
+            }
+          } else if (item.endpoint == '/voz/registrar_biometria') {
+            // Registro de biometría de voz
+            if (item.audioBase64 != null) {
+              final audioBytes = Uint8List.fromList(
+                item.audioBase64!.codeUnits,
+              );
+              await _biometricBackend.registrarBiometriaVoz(
+                identificador: item.data['identificador_unico'] ?? '',
+                audios: [audioBytes],
+              );
+              success = true;
+            }
+          } else {
+            // Para otros endpoints, usar Dio genérico
+            final response = await _dio.post(
+              item.endpoint,
+              data: {
+                ...item.data,
+                'photo_base64': item.photoBase64,
+                'audio_base64': item.audioBase64,
+              },
+              options: Options(
+                headers: {'Authorization': 'Bearer ${await _getToken()}'},
+              ),
+            );
+            success = response.statusCode == 200 || response.statusCode == 201;
+          }
+
+          if (success) {
             await _offlineSync.markAsSynced(item.id);
             await _offlineSync.deletePendingData(item.id);
             uploaded++;
@@ -309,11 +355,11 @@ class BidirectionalSyncService {
   /// ==========================================
 
   /// Iniciar sincronización automática periódica
-  /// Verifica conectividad cada 5 segundos (para testing) y solo sincroniza si hay internet
+  /// Verifica conectividad cada 60 segundos y solo sincroniza si hay internet
   void startAutoSync({
     required int idUsuario,
     String? dispositivoId,
-    Duration interval = const Duration(seconds: 5), // 5 segundos para testing
+    Duration interval = const Duration(seconds: 60), // 1 minuto por defecto
   }) {
     stopAutoSync(); // Detener timer anterior si existe
 

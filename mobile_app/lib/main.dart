@@ -37,8 +37,31 @@ class _BiometricAppState extends State<BiometricApp> {
     _syncManager = SyncManager();
     _syncManager.startAutoSync();
 
+    // 🔄 Sincronizar frases del backend al iniciar la app
+    _syncPhrasesOnStartup();
+
     // Escuchar cambios en las configuraciones cada 2 segundos
     _listenToSettingsChanges();
+  }
+
+  /// 🔄 Sincronizar frases del backend cuando hay conexión
+  Future<void> _syncPhrasesOnStartup() async {
+    try {
+      // Esperar un poco para que la app termine de inicializarse
+      await Future.delayed(Duration(seconds: 2));
+
+      if (!mounted) return;
+
+      final success = await _syncManager.syncPhrasesFromBackend();
+
+      if (success && _currentSettings.enableDebugLogs) {
+        print('[App] ✅ Frases sincronizadas del backend');
+      }
+    } catch (e) {
+      if (_currentSettings.enableDebugLogs) {
+        print('[App] ⚠️ No se pudieron sincronizar frases: $e');
+      }
+    }
   }
 
   void _listenToSettingsChanges() {

@@ -18,6 +18,11 @@ class AdminSettings {
   int requestTimeoutSeconds;
   bool allowInsecureConnections;
 
+  // ✅ NUEVO: URLs del backend biométrico en la nube
+  String backendIp;
+  int backendPuertoOreja;
+  int backendPuertoVoz;
+
   // Configuraciones de debug
   bool enableDebugLogs;
   bool showNetworkIndicator;
@@ -28,6 +33,12 @@ class AdminSettings {
   int audioRecordingDuration;
   bool allowMultipleRegistrations;
   bool enableEarValidation; // Nueva: Habilitar validación con TFLite
+  bool
+  requireAllFieldsInRegistration; // Nueva: Bloquear "Siguiente" si hay campos vacíos
+
+  // Configuraciones de notificaciones
+  int
+  offlineMessageIntervalMinutes; // Intervalo para mostrar mensaje de "sin conexión"
 
   AdminSettings({
     this.isDarkMode = false,
@@ -40,6 +51,10 @@ class AdminSettings {
     this.apiBaseUrl = 'http://10.52.41.36:3000/api',
     this.requestTimeoutSeconds = 30,
     this.allowInsecureConnections = true,
+    // ✅ NUEVO: Valores por defecto del backend en la nube
+    this.backendIp = '167.71.155.9',
+    this.backendPuertoOreja = 8080,
+    this.backendPuertoVoz = 8081,
     this.enableDebugLogs = true,
     this.showNetworkIndicator = true,
     this.showSyncStatus = true,
@@ -47,6 +62,9 @@ class AdminSettings {
     this.audioRecordingDuration = 5,
     this.allowMultipleRegistrations = true,
     this.enableEarValidation = true, // ✅ HABILITADO para testing
+    this.requireAllFieldsInRegistration =
+        true, // ✅ Por defecto requiere todos los campos
+    this.offlineMessageIntervalMinutes = 1, // ✅ Mostrar mensaje cada 1 minuto
   });
 
   /// Convertir a Map para guardar en storage
@@ -62,6 +80,9 @@ class AdminSettings {
       'apiBaseUrl': apiBaseUrl,
       'requestTimeoutSeconds': requestTimeoutSeconds,
       'allowInsecureConnections': allowInsecureConnections,
+      'backendIp': backendIp, // ✅ NUEVO
+      'backendPuertoOreja': backendPuertoOreja, // ✅ NUEVO
+      'backendPuertoVoz': backendPuertoVoz, // ✅ NUEVO
       'enableDebugLogs': enableDebugLogs,
       'showNetworkIndicator': showNetworkIndicator,
       'showSyncStatus': showSyncStatus,
@@ -69,6 +90,8 @@ class AdminSettings {
       'audioRecordingDuration': audioRecordingDuration,
       'allowMultipleRegistrations': allowMultipleRegistrations,
       'enableEarValidation': enableEarValidation,
+      'requireAllFieldsInRegistration': requireAllFieldsInRegistration,
+      'offlineMessageIntervalMinutes': offlineMessageIntervalMinutes,
     };
   }
 
@@ -85,6 +108,9 @@ class AdminSettings {
       apiBaseUrl: json['apiBaseUrl'] ?? 'http://10.52.41.36:3000/api',
       requestTimeoutSeconds: json['requestTimeoutSeconds'] ?? 30,
       allowInsecureConnections: json['allowInsecureConnections'] ?? true,
+      backendIp: json['backendIp'] ?? '167.71.155.9', // ✅ NUEVO
+      backendPuertoOreja: json['backendPuertoOreja'] ?? 8080, // ✅ NUEVO
+      backendPuertoVoz: json['backendPuertoVoz'] ?? 8081, // ✅ NUEVO
       enableDebugLogs: json['enableDebugLogs'] ?? true,
       showNetworkIndicator: json['showNetworkIndicator'] ?? true,
       showSyncStatus: json['showSyncStatus'] ?? true,
@@ -92,6 +118,9 @@ class AdminSettings {
       audioRecordingDuration: json['audioRecordingDuration'] ?? 5,
       allowMultipleRegistrations: json['allowMultipleRegistrations'] ?? true,
       enableEarValidation: json['enableEarValidation'] ?? false,
+      requireAllFieldsInRegistration:
+          json['requireAllFieldsInRegistration'] ?? true,
+      offlineMessageIntervalMinutes: json['offlineMessageIntervalMinutes'] ?? 1,
     );
   }
 
@@ -107,6 +136,9 @@ class AdminSettings {
     String? apiBaseUrl,
     int? requestTimeoutSeconds,
     bool? allowInsecureConnections,
+    String? backendIp, // ✅ NUEVO
+    int? backendPuertoOreja, // ✅ NUEVO
+    int? backendPuertoVoz, // ✅ NUEVO
     bool? enableDebugLogs,
     bool? showNetworkIndicator,
     bool? showSyncStatus,
@@ -114,6 +146,8 @@ class AdminSettings {
     int? audioRecordingDuration,
     bool? allowMultipleRegistrations,
     bool? enableEarValidation,
+    bool? requireAllFieldsInRegistration,
+    int? offlineMessageIntervalMinutes,
   }) {
     return AdminSettings(
       isDarkMode: isDarkMode ?? this.isDarkMode,
@@ -129,6 +163,10 @@ class AdminSettings {
           requestTimeoutSeconds ?? this.requestTimeoutSeconds,
       allowInsecureConnections:
           allowInsecureConnections ?? this.allowInsecureConnections,
+      backendIp: backendIp ?? this.backendIp, // ✅ NUEVO
+      backendPuertoOreja:
+          backendPuertoOreja ?? this.backendPuertoOreja, // ✅ NUEVO
+      backendPuertoVoz: backendPuertoVoz ?? this.backendPuertoVoz, // ✅ NUEVO
       enableDebugLogs: enableDebugLogs ?? this.enableDebugLogs,
       showNetworkIndicator: showNetworkIndicator ?? this.showNetworkIndicator,
       showSyncStatus: showSyncStatus ?? this.showSyncStatus,
@@ -138,6 +176,10 @@ class AdminSettings {
       allowMultipleRegistrations:
           allowMultipleRegistrations ?? this.allowMultipleRegistrations,
       enableEarValidation: enableEarValidation ?? this.enableEarValidation,
+      requireAllFieldsInRegistration:
+          requireAllFieldsInRegistration ?? this.requireAllFieldsInRegistration,
+      offlineMessageIntervalMinutes:
+          offlineMessageIntervalMinutes ?? this.offlineMessageIntervalMinutes,
     );
   }
 }

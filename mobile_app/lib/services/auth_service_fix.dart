@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import '../models/user.dart';
 import '../services/local_database_service.dart';
 import '../services/biometric_service.dart';
+import '../services/biometric_backend_service.dart'; // ✅ NUEVO
 import '../models/biometric_models.dart';
 import '../config/api_config.dart';
 
@@ -16,6 +17,12 @@ class AuthServiceFix {
 
   final Dio _dio = ApiConfig().dio;
   final _secureStorage = const FlutterSecureStorage();
+  final _biometricBackend = BiometricBackendService(); // ✅ NUEVO
+
+  /// ✅ NUEVO: Actualizar URLs del backend biométrico desde configuración
+  Future<void> updateBackendUrls() async {
+    await _biometricBackend.updateBackendUrls();
+  }
 
   Future<String> register({
     required String nombres,

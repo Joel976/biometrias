@@ -34,6 +34,7 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
   int _checkCount = 0; // Contador de verificaciones
   bool _isChecking = false; // Para animar el cambio de color
   AdminSettings? _settings;
+  DateTime? _lastOfflineBannerTime; // Control de banner offline
 
   @override
   void initState() {
@@ -44,8 +45,8 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
     _loadSettings();
     _checkConnectivity();
 
-    // Verificar conectividad cada 10 segundos (reducido de 60)
-    _connectivityCheckTimer = Timer.periodic(Duration(seconds: 10), (timer) {
+    // Verificar conectividad cada 60 segundos (1 minuto)
+    _connectivityCheckTimer = Timer.periodic(Duration(seconds: 60), (timer) {
       _checkCount++;
       debugPrint('[Connectivity] 🔍 Verificación #$_checkCount...');
 
@@ -71,10 +72,22 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
     _connectivity.onConnectivityChanged.listen((result) {
       setState(() {
         // result es una lista; si está vacía, no hay conexión
+        final wasOffline = !_isOnline;
         _isOnline =
             result.isNotEmpty && result.first != ConnectivityResult.none;
 
-        if (_isOnline) {
+        print(
+          '🌐🌐🌐 [ConnectivityWidget] CAMBIO DE CONEXIÓN DETECTADO 🌐🌐🌐',
+        );
+        print('🌐 Estado anterior: ${wasOffline ? "OFFLINE" : "ONLINE"}');
+        print('🌐 Estado nuevo: ${_isOnline ? "ONLINE" : "OFFLINE"}');
+        print('🌐 Resultado: $result');
+
+        if (_isOnline && wasOffline) {
+          print(
+            '🌐✅ ¡RECONEXIÓN DETECTADA! Iniciando sincronización automática...',
+          );
+
           // Mostrar banner cuando se reconecta
           _showSyncBanner = true;
           Future.delayed(Duration(seconds: 2), () {
@@ -82,7 +95,17 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
           });
 
           // Trigger sync automático
-          _syncManager.performSync();
+          print('🌐🔄 Llamando a performSync() automáticamente...');
+          _syncManager
+              .performSync()
+              .then((_) {
+                print('🌐✅ Sincronización automática completada');
+              })
+              .catchError((error) {
+                print('🌐❌ Error en sincronización automática: $error');
+              });
+        } else if (!_isOnline) {
+          print('🌐❌ Conexión perdida - modo offline');
         }
       });
     });
@@ -269,11 +292,31 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
       return _buildSyncBanner();
     }
 
-    if (!_isOnline) {
+    // Solo mostrar banner offline según intervalo configurado
+    if (!_isOnline && _shouldShowOfflineBanner()) {
       return _buildOfflineBanner();
     }
 
     return const SizedBox.shrink();
+  }
+
+  /// Verificar si debe mostrarse el banner offline según intervalo
+  bool _shouldShowOfflineBanner() {
+    final intervalMinutes = _settings?.offlineMessageIntervalMinutes ?? 1;
+    final now = DateTime.now();
+
+    if (_lastOfflineBannerTime == null) {
+      _lastOfflineBannerTime = now;
+      return true; // Primera vez, mostrar
+    }
+
+    final difference = now.difference(_lastOfflineBannerTime!);
+    if (difference.inMinutes >= intervalMinutes) {
+      _lastOfflineBannerTime = now;
+      return true; // Ya pasó el intervalo, mostrar
+    }
+
+    return false; // Aún no pasa el intervalo, no mostrar
   }
 
   /// Banner cuando está sincronizando

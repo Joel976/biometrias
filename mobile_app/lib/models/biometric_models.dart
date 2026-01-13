@@ -55,34 +55,39 @@ class BiometricCredential {
 
 class AudioPhrase {
   final int id;
-  final int idUsuario;
+  final int? idUsuario; // Opcional: no todas las tablas tienen este campo
   final String frase;
   final String estadoTexto; // 'activo', 'usado', 'expirado'
-  final DateTime fechaAsignacion;
+  final DateTime?
+  fechaAsignacion; // Opcional: no todas las tablas tienen este campo
 
   AudioPhrase({
     required this.id,
-    required this.idUsuario,
+    this.idUsuario,
     required this.frase,
     required this.estadoTexto,
-    required this.fechaAsignacion,
+    this.fechaAsignacion,
   });
 
   factory AudioPhrase.fromMap(Map<String, dynamic> map) {
     return AudioPhrase(
       id: map['id_texto'] as int,
-      idUsuario: map['id_usuario'] as int,
+      idUsuario: map['id_usuario'] as int?,
       frase: map['frase'] as String,
       estadoTexto: map['estado_texto'] as String,
-      fechaAsignacion: DateTime.parse(map['fecha_asignacion'] as String),
+      fechaAsignacion: map['fecha_asignacion'] != null
+          ? DateTime.parse(map['fecha_asignacion'] as String)
+          : null,
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
-      'id_usuario': idUsuario,
+      if (idUsuario != null) 'id_usuario': idUsuario,
       'frase': frase,
       'estado_texto': estadoTexto,
+      if (fechaAsignacion != null)
+        'fecha_asignacion': fechaAsignacion!.toIso8601String(),
     };
   }
 

@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import '../models/user.dart';
 import '../services/local_database_service.dart';
 import '../services/biometric_service.dart';
+import '../services/ear_validator_service.dart';
+import '../services/biometric_backend_service.dart'; // ← NUEVO SERVICIO
 import '../models/biometric_models.dart';
 import '../config/api_config.dart';
 
@@ -172,34 +174,82 @@ class AuthService {
   ) async {
     final localDb = LocalDatabaseService();
     final bio = BiometricService();
+    final earValidator = EarValidatorService();
+    final backendService = BiometricBackendService(); // ← NUEVO SERVICIO
 
-    // Intentar verificación remota primero
+    // 🔴 PASO 1: VALIDACIÓN TFLITE LOCAL (OBLIGATORIA)
+    print('[AuthService] 🔍 Validando imagen con TFLite antes de login...');
+
     try {
-      final base64Photo = base64Encode(photoBytes);
-
-      final response = await _dio.post(
-        AuthService.baseUrl + '/biometria/verificar-oreja',
-        data: {'identificadorUnico': identificadorUnico, 'foto': base64Photo},
+      await earValidator.initialize();
+      final validationResult = await earValidator.validateEar(
+        Uint8List.fromList(photoBytes),
       );
 
-      if (response.statusCode == 200) {
-        final confianza = (response.data['confianza'] ?? 0) as num;
+      print('[AuthService] 📊 TFLite Result:');
+      print(
+        '[AuthService]   - Confianza: ${(validationResult.confidence * 100).toStringAsFixed(1)}%',
+      );
+      print('[AuthService]   - Es válida: ${validationResult.isValid}');
+
+      // Si NO pasa la validación TFLite, rechazar inmediatamente
+      if (!validationResult.isValid) {
+        print(
+          '[AuthService] ❌ Imagen rechazada por TFLite: ${validationResult.error ?? "No es oreja clara"}',
+        );
+
+        // Registrar intento fallido
+        final user = await localDb.getUserByIdentifier(identificadorUnico);
+        if (user != null) {
+          final validation = BiometricValidation(
+            id: 0,
+            idUsuario: user['id_usuario'] as int,
+            tipoBiometria: 'oreja',
+            resultado: 'fallo',
+            modoValidacion: 'tflite_local',
+            timestamp: DateTime.now(),
+            puntuacionConfianza: validationResult.confidence,
+            duracionValidacion: 0,
+          );
+          await localDb.insertValidation(validation);
+        }
+
+        return false; // ← RECHAZAR SIN ENVIAR AL BACKEND
+      }
+
+      print(
+        '[AuthService] ✅ Imagen aprobada por TFLite - procediendo con backend...',
+      );
+    } catch (e) {
+      print('[AuthService] ⚠️ Error en validación TFLite: $e');
+      // Continuar de todos modos (fallback) - puedes cambiar esto a return false si prefieres
+    }
+
+    // 🔴 PASO 2: INTENTAR VERIFICACIÓN REMOTA CON BACKEND DE COMPAÑEROS (solo si pasó TFLite)
+    try {
+      final online = await backendService.isOnline();
+
+      if (online) {
+        print('[AuthService] 🌐 Autenticando con backend en la nube...');
+
+        final result = await backendService.autenticarOreja(
+          imagenBytes: Uint8List.fromList(photoBytes),
+          identificador: identificadorUnico,
+        );
 
         // Registrar validación localmente (audit)
         final user = await localDb.getUserByIdentifier(identificadorUnico);
         final int? idUsuario = user != null ? user['id_usuario'] as int : null;
+
         if (idUsuario != null) {
           final validation = BiometricValidation(
             id: 0,
             idUsuario: idUsuario,
             tipoBiometria: 'oreja',
-            resultado:
-                (response.data['coincidencia'] == true || confianza > 0.8)
-                ? 'exito'
-                : 'fallo',
-            modoValidacion: 'online',
+            resultado: result['autenticado'] == true ? 'exito' : 'fallo',
+            modoValidacion: 'online_cloud',
             timestamp: DateTime.now(),
-            puntuacionConfianza: confianza.toDouble(),
+            puntuacionConfianza: (result['margen'] ?? 0.0).toDouble(),
             duracionValidacion: 0,
           );
           await localDb.insertValidation(validation);
@@ -212,13 +262,15 @@ class AuthService {
               });
         }
 
-        return response.data['coincidencia'] == true || confianza > 0.8;
+        return result['autenticado'] == true;
       }
     } catch (e) {
+      print('[AuthService] ⚠️ Backend no disponible: $e');
+      print('[AuthService] 🔄 Usando fallback local...');
       // Ignorar y caer al fallback local
     }
 
-    // Fallback local (offline): buscar plantillas locales y comparar
+    // 🔴 PASO 3: FALLBACK LOCAL (offline)
     try {
       final user = await localDb.getUserByIdentifier(identificadorUnico);
       if (user == null) return false;
@@ -250,14 +302,12 @@ class AuthService {
       final validation = BiometricValidation(
         id: 0,
         idUsuario: idUsuario,
-        tipoBiometria: 'oreja',
+        tipoBiometria: 'audio',
         resultado: success ? 'exito' : 'fallo',
         modoValidacion: 'offline',
         timestamp: DateTime.now(),
         puntuacionConfianza: bestConfidence,
-        duracionValidacion: (bestResult?.processingTime != null)
-            ? bestResult!.processingTime!.inMilliseconds
-            : 0,
+        duracionValidacion: bestResult?.processingTime?.inMilliseconds ?? 0,
       );
 
       await localDb.insertValidation(validation);
@@ -278,37 +328,43 @@ class AuthService {
   /// Autenticar con audio de voz
   Future<bool> authenticateWithVoice(
     String identificadorUnico,
-    List<int> audioBytes,
-  ) async {
+    List<int> audioBytes, {
+    int? idFrase,
+  }) async {
     final localDb = LocalDatabaseService();
     final bio = BiometricService();
+    final backendService = BiometricBackendService();
 
-    // Intentar verificación remota
+    // 🔴 PASO 1: INTENTAR VERIFICACIÓN REMOTA CON BACKEND DE COMPAÑEROS
     try {
-      final base64Audio = base64Encode(audioBytes);
+      final online = await backendService.isOnline();
 
-      final response = await _dio.post(
-        AuthService.baseUrl + '/biometria/verificar-voz',
-        data: {'identificadorUnico': identificadorUnico, 'audio': base64Audio},
-      );
+      if (online) {
+        print('[AuthService] 🌐 Autenticando voz con backend en la nube...');
 
-      if (response.statusCode == 200) {
-        final confianza = (response.data['confianza'] ?? 0) as num;
+        // Obtener frase aleatoria si no se proporciona
+        final fraseId =
+            idFrase ?? 1; // Por defecto 1, o se puede obtener aleatoria
+
+        final result = await backendService.autenticarVoz(
+          audioBytes: Uint8List.fromList(audioBytes),
+          identificador: identificadorUnico,
+          idFrase: fraseId,
+        );
 
         final user = await localDb.getUserByIdentifier(identificadorUnico);
         final int? idUsuario = user != null ? user['id_usuario'] as int : null;
+
         if (idUsuario != null) {
           final validation = BiometricValidation(
             id: 0,
             idUsuario: idUsuario,
             tipoBiometria: 'audio',
-            resultado:
-                (response.data['coincidencia'] == true || confianza > 0.8)
-                ? 'exito'
-                : 'fallo',
-            modoValidacion: 'online',
+            resultado: result['autenticado'] == true ? 'exito' : 'fallo',
+            modoValidacion: 'online_cloud',
             timestamp: DateTime.now(),
-            puntuacionConfianza: confianza.toDouble(),
+            puntuacionConfianza:
+                0.0, // Backend de voz no retorna score específico
             duracionValidacion: 0,
           );
           await localDb.insertValidation(validation);
@@ -321,13 +377,15 @@ class AuthService {
               });
         }
 
-        return response.data['coincidencia'] == true || confianza > 0.8;
+        return result['autenticado'] == true;
       }
     } catch (e) {
+      print('[AuthService] ⚠️ Backend de voz no disponible: $e');
+      print('[AuthService] 🔄 Usando fallback local...');
       // Caer al fallback local
     }
 
-    // Fallback local (offline)
+    // 🔴 PASO 2: FALLBACK LOCAL (offline)
     try {
       final user = await localDb.getUserByIdentifier(identificadorUnico);
       if (user == null) return false;
@@ -365,7 +423,7 @@ class AuthService {
         modoValidacion: 'offline',
         timestamp: DateTime.now(),
         puntuacionConfianza: bestConfidence,
-        duracionValidacion: bestResult?.processingTime?.inMilliseconds ?? 0,
+        duracionValidacion: bestResult?.processingTime.inMilliseconds ?? 0,
       );
 
       await localDb.insertValidation(validation);

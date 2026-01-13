@@ -1,14 +1,10 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:encrypt/encrypt.dart' as encrypt;
 
 class DatabaseConfig {
   static const String dbName = 'biometrics_local.db';
   static const int dbVersion =
-      3; // bump v3: Eliminar datos locales (migración 005 en PostgreSQL, contraseña removida)
-
-  // Clave de cifrado para SQLCipher (en producción usar key management seguro)
-  static const String encryptionPassword = 'your_secure_encryption_key_here';
+      11; // v11: Agregar tabla sincronizaciones para rastrear estado de sync por usuario
 
   static final DatabaseConfig _instance = DatabaseConfig._internal();
 
@@ -38,113 +34,157 @@ class DatabaseConfig {
   }
 
   Future<void> _createTables(Database db, int version) async {
-    // Tabla de usuarios locales
+    // 📌 Tabla principal de usuarios (IDÉNTICA A POSTGRESQL + campos de completitud)
     await db.execute('''
       CREATE TABLE usuarios (
-        id_usuario INTEGER PRIMARY KEY,
+        id_usuario INTEGER PRIMARY KEY AUTOINCREMENT,
         nombres TEXT,
         apellidos TEXT,
-        identificador_unico TEXT UNIQUE,
-        estado TEXT,
-        local_uuid TEXT UNIQUE,
-        remote_id INTEGER
+        fecha_nacimiento TEXT,
+        sexo TEXT,
+        identificador_unico TEXT UNIQUE NOT NULL,
+        estado TEXT DEFAULT 'activo',
+        fecha_registro TEXT DEFAULT CURRENT_TIMESTAMP,
+        datos_completos INTEGER DEFAULT 0,
+        orejas_completas INTEGER DEFAULT 0,
+        voz_completa INTEGER DEFAULT 0
       )
     ''');
 
-    // Tabla de credenciales biométricas locales
+    // 📌 Tabla para credenciales biométricas (CON TEMPLATE BLOB)
     await db.execute('''
       CREATE TABLE credenciales_biometricas (
         id_credencial INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        tipo_biometria TEXT,
+        id_usuario INTEGER NOT NULL,
+        tipo_biometria TEXT CHECK (tipo_biometria IN ('oreja', 'voz', 'audio')),
         template BLOB,
         validez_hasta TEXT,
-        version_algoritmo TEXT,
-        local_uuid TEXT UNIQUE,
-        remote_id INTEGER,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
+        version_algoritmo TEXT DEFAULT '1.0',
+        fecha_captura TEXT DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT DEFAULT 'activo',
+        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
       )
     ''');
 
-    // Tabla de frases dinámicas activas
+    // 📌 Tabla de frases dinámicas (CON CONTADOR Y LÍMITE DE USOS)
     await db.execute('''
       CREATE TABLE textos_dinamicos_audio (
         id_texto INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        frase TEXT,
-        estado_texto TEXT,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
+        frase TEXT NOT NULL,
+        estado_texto TEXT DEFAULT 'activo',
+        contador_usos INTEGER DEFAULT 0,
+        limite_usos INTEGER DEFAULT 100
       )
     ''');
 
-    // Validaciones realizadas
+    // 📌 Tabla de auditoría de validaciones biométricas (COMPLETA)
     await db.execute('''
       CREATE TABLE validaciones_biometricas (
         id_validacion INTEGER PRIMARY KEY AUTOINCREMENT,
         id_usuario INTEGER,
         tipo_biometria TEXT,
         resultado TEXT,
-        modo_validacion TEXT,
-        timestamp TEXT,
+        modo_validacion TEXT DEFAULT 'offline',
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
         ubicacion_gps TEXT,
+        dispositivo_id TEXT,
         puntuacion_confianza REAL,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
+        duracion_validacion INTEGER,
+        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE SET NULL
       )
     ''');
 
-    // Sincronización de datos pendientes
+    // 📌 TABLAS ADICIONALES SOLO PARA SQLITE (gestión local)
+
+    // Tabla de templates biométricos locales (almacena los datos de oreja/voz)
+    await db.execute('''
+      CREATE TABLE templates_biometricos (
+        id_template INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_credencial INTEGER NOT NULL,
+        datos_biometricos BLOB,
+        metadatos TEXT,
+        FOREIGN KEY(id_credencial) REFERENCES credenciales_biometricas(id_credencial) ON DELETE CASCADE
+      )
+    ''');
+
+    // Tabla de sincronización (para rastrear qué se ha enviado al backend)
+    await db.execute('''
+      CREATE TABLE sync_status (
+        id_sync INTEGER PRIMARY KEY AUTOINCREMENT,
+        tabla_origen TEXT NOT NULL,
+        id_registro_local INTEGER NOT NULL,
+        id_registro_remoto INTEGER,
+        estado_sync TEXT DEFAULT 'pendiente',
+        fecha_ultimo_intento TEXT,
+        intentos INTEGER DEFAULT 0,
+        error_mensaje TEXT
+      )
+    ''');
+
+    // Cola de sincronización para offline-first
+    await db.execute('''
+      CREATE TABLE cola_sincronizacion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_usuario INTEGER,
+        tipo_entidad TEXT NOT NULL,
+        operacion TEXT NOT NULL,
+        datos_json TEXT,
+        local_uuid TEXT UNIQUE,
+        estado TEXT DEFAULT 'pendiente',
+        fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+        intentos_sync INTEGER DEFAULT 0,
+        ultimo_error TEXT,
+        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
+      )
+    ''');
+
+    // Tabla para rastrear estado de sincronización por usuario
     await db.execute('''
       CREATE TABLE sincronizaciones (
         id_sync INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        fecha_ultima_sync TEXT,
-        tipo_sync TEXT,
-        estado_sync TEXT,
-        cantidad_items INTEGER,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
+        id_usuario INTEGER NOT NULL,
+        fecha_ultima_sync TEXT DEFAULT CURRENT_TIMESTAMP,
+        sincronizado INTEGER DEFAULT 1,
+        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
       )
     ''');
 
-    // Cola de sincronización
-    await db.execute('''
-      CREATE TABLE cola_sincronizacion (
-        id_cola INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        tipo_entidad TEXT,
-        operacion TEXT,
-        datos_json TEXT,
-        local_uuid TEXT,
-        estado TEXT,
-        fecha_creacion TEXT,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
-      )
-    ''');
+    print('✅ Base de datos SQLite creada con esquema PostgreSQL');
 
-    // Sesiones locales
-    await db.execute('''
-      CREATE TABLE sesiones_locales (
-        id_sesion INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        token_acceso TEXT,
-        refresh_token TEXT,
-        fecha_inicio TEXT,
-        fecha_expiracion TEXT,
-        dispositivo_id TEXT,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
-      )
-    ''');
+    // 📌 Insertar frases predeterminadas si no existen
+    await _seedDefaultPhrases(db);
+  }
 
-    // Errores de sincronización
-    await db.execute('''
-      CREATE TABLE errores_sync (
-        id_error INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_usuario INTEGER,
-        tipo_error TEXT,
-        mensaje_error TEXT,
-        timestamp TEXT,
-        FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario)
-      )
-    ''');
+  /// Insertar frases de audio predeterminadas para autenticación de voz
+  Future<void> _seedDefaultPhrases(Database db) async {
+    // Verificar si ya hay frases
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM textos_dinamicos_audio'),
+    );
+
+    if (count == null || count == 0) {
+      print('📝 Insertando frases predeterminadas...');
+
+      final defaultPhrases = [
+        'Mi voz es mi contraseña',
+        'Autenticación por reconocimiento de voz',
+        'Acceso seguro mediante biometría vocal',
+        'Verificación de identidad por voz',
+        'Sistema de seguridad biométrica',
+        'Ingreso autorizado por voz',
+      ];
+
+      for (int i = 0; i < defaultPhrases.length; i++) {
+        await db.insert('textos_dinamicos_audio', {
+          'frase': defaultPhrases[i],
+          'estado_texto': 'activo',
+        });
+      }
+
+      print('✅ ${defaultPhrases.length} frases predeterminadas insertadas');
+    } else {
+      print('✓ Frases de audio ya existen ($count frases)');
+    }
   }
 
   Future<void> _upgradeTables(
@@ -152,33 +192,308 @@ class DatabaseConfig {
     int oldVersion,
     int newVersion,
   ) async {
-    // Migraciones incrementales
-    if (oldVersion < 2) {
+    print('🔄 Migrando base de datos de v$oldVersion a v$newVersion');
+
+    if (oldVersion < 4) {
+      // Recrear todas las tablas con el nuevo esquema
+      await db.execute('DROP TABLE IF EXISTS cola_sincronizacion');
+      await db.execute('DROP TABLE IF EXISTS sincronizaciones');
+      await db.execute('DROP TABLE IF EXISTS sesiones_locales');
+      await db.execute('DROP TABLE IF EXISTS errores_sync');
+      await db.execute('DROP TABLE IF EXISTS templates_biometricos');
+      await db.execute('DROP TABLE IF EXISTS sync_status');
+      await db.execute('DROP TABLE IF EXISTS validaciones_biometricas');
+      await db.execute('DROP TABLE IF EXISTS textos_dinamicos_audio');
+      await db.execute('DROP TABLE IF EXISTS credenciales_biometricas');
+      await db.execute('DROP TABLE IF EXISTS usuarios');
+
+      // Recrear con nuevo esquema
+      await _createTables(db, newVersion);
+      print('✅ Migración completada a esquema PostgreSQL v4');
+    }
+
+    if (oldVersion < 5) {
+      // Agregar campos de completitud a usuarios existentes
+      // Verificar primero si las columnas ya existen
       try {
-        await db.execute('ALTER TABLE usuarios ADD COLUMN local_uuid TEXT');
+        final tableInfo = await db.rawQuery('PRAGMA table_info(usuarios)');
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
+
+        if (!columnNames.contains('datos_completos')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN datos_completos INTEGER DEFAULT 0',
+          );
+          print('✅ Campo datos_completos agregado');
+        }
+
+        if (!columnNames.contains('orejas_completas')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN orejas_completas INTEGER DEFAULT 0',
+          );
+          print('✅ Campo orejas_completas agregado');
+        }
+
+        if (!columnNames.contains('voz_completa')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN voz_completa INTEGER DEFAULT 0',
+          );
+          print('✅ Campo voz_completa agregado');
+        }
+
+        print('✅ Migración completada a v5: Campos de completitud verificados');
       } catch (e) {
-        // ignore si ya existe
+        print('⚠️ Error en migración v5: $e');
+        // Si falla, intentar recrear la tabla
+        print('🔄 Recreando tabla usuarios con nuevos campos...');
+
+        // Respaldar datos existentes
+        final backupData = await db.query('usuarios');
+
+        // Eliminar y recrear tabla
+        await db.execute('DROP TABLE IF EXISTS usuarios');
+        await db.execute('''
+          CREATE TABLE usuarios (
+            id_usuario INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombres TEXT,
+            apellidos TEXT,
+            fecha_nacimiento TEXT,
+            sexo TEXT,
+            identificador_unico TEXT UNIQUE NOT NULL,
+            estado TEXT DEFAULT 'activo',
+            fecha_registro TEXT DEFAULT CURRENT_TIMESTAMP,
+            datos_completos INTEGER DEFAULT 0,
+            orejas_completas INTEGER DEFAULT 0,
+            voz_completa INTEGER DEFAULT 0
+          )
+        ''');
+
+        // Restaurar datos
+        for (final row in backupData) {
+          await db.insert('usuarios', {
+            ...row,
+            'datos_completos': 0,
+            'orejas_completas': 0,
+            'voz_completa': 0,
+          });
+        }
+
+        print('✅ Tabla usuarios recreada con campos de completitud');
       }
-      try {
-        await db.execute('ALTER TABLE usuarios ADD COLUMN remote_id INTEGER');
-      } catch (e) {}
+    }
 
+    // v6: Asegurar que todos los campos existen (idempotente)
+    if (oldVersion < 6) {
       try {
-        await db.execute(
-          'ALTER TABLE credenciales_biometricas ADD COLUMN local_uuid TEXT',
-        );
-      } catch (e) {}
-      try {
-        await db.execute(
-          'ALTER TABLE credenciales_biometricas ADD COLUMN remote_id INTEGER',
-        );
-      } catch (e) {}
+        final tableInfo = await db.rawQuery('PRAGMA table_info(usuarios)');
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
 
-      try {
-        await db.execute(
-          'ALTER TABLE cola_sincronizacion ADD COLUMN local_uuid TEXT',
+        if (!columnNames.contains('datos_completos')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN datos_completos INTEGER DEFAULT 0',
+          );
+        }
+        if (!columnNames.contains('orejas_completas')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN orejas_completas INTEGER DEFAULT 0',
+          );
+        }
+        if (!columnNames.contains('voz_completa')) {
+          await db.execute(
+            'ALTER TABLE usuarios ADD COLUMN voz_completa INTEGER DEFAULT 0',
+          );
+        }
+        print('✅ Migración v6: Campos de completitud verificados');
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v6, pero se puede ignorar si ya existen: $e',
         );
-      } catch (e) {}
+      }
+    }
+
+    // v7: Agregar columnas faltantes en validaciones_biometricas
+    if (oldVersion < 7) {
+      try {
+        final tableInfo = await db.rawQuery(
+          'PRAGMA table_info(validaciones_biometricas)',
+        );
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
+
+        if (!columnNames.contains('modo_validacion')) {
+          await db.execute(
+            'ALTER TABLE validaciones_biometricas ADD COLUMN modo_validacion TEXT DEFAULT \'offline\'',
+          );
+          print('✅ Columna modo_validacion agregada');
+        }
+        if (!columnNames.contains('ubicacion_gps')) {
+          await db.execute(
+            'ALTER TABLE validaciones_biometricas ADD COLUMN ubicacion_gps TEXT',
+          );
+          print('✅ Columna ubicacion_gps agregada');
+        }
+        if (!columnNames.contains('dispositivo_id')) {
+          await db.execute(
+            'ALTER TABLE validaciones_biometricas ADD COLUMN dispositivo_id TEXT',
+          );
+          print('✅ Columna dispositivo_id agregada');
+        }
+        if (!columnNames.contains('puntuacion_confianza')) {
+          await db.execute(
+            'ALTER TABLE validaciones_biometricas ADD COLUMN puntuacion_confianza REAL',
+          );
+          print('✅ Columna puntuacion_confianza agregada');
+        }
+        if (!columnNames.contains('duracion_validacion')) {
+          await db.execute(
+            'ALTER TABLE validaciones_biometricas ADD COLUMN duracion_validacion INTEGER',
+          );
+          print('✅ Columna duracion_validacion agregada');
+        }
+        print('✅ Migración v7: Tabla validaciones_biometricas actualizada');
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v7, pero se puede ignorar si ya existen: $e',
+        );
+      }
+    }
+
+    // v8: Agregar columnas de template a credenciales_biometricas
+    if (oldVersion < 8) {
+      try {
+        final tableInfo = await db.rawQuery(
+          'PRAGMA table_info(credenciales_biometricas)',
+        );
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
+
+        if (!columnNames.contains('template')) {
+          await db.execute(
+            'ALTER TABLE credenciales_biometricas ADD COLUMN template BLOB',
+          );
+          print('✅ Columna template agregada a credenciales_biometricas');
+        }
+        if (!columnNames.contains('validez_hasta')) {
+          await db.execute(
+            'ALTER TABLE credenciales_biometricas ADD COLUMN validez_hasta TEXT',
+          );
+          print('✅ Columna validez_hasta agregada a credenciales_biometricas');
+        }
+        if (!columnNames.contains('version_algoritmo')) {
+          await db.execute(
+            'ALTER TABLE credenciales_biometricas ADD COLUMN version_algoritmo TEXT DEFAULT \'1.0\'',
+          );
+          print(
+            '✅ Columna version_algoritmo agregada a credenciales_biometricas',
+          );
+        }
+        print(
+          '✅ Migración v8: Tabla credenciales_biometricas actualizada con columnas de template',
+        );
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v8, pero se puede ignorar si ya existen: $e',
+        );
+      }
+    }
+
+    // v9: Agregar tabla cola_sincronizacion
+    if (oldVersion < 9) {
+      try {
+        // Verificar si la tabla ya existe
+        final tables = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='cola_sincronizacion'",
+        );
+
+        if (tables.isEmpty) {
+          await db.execute('''
+            CREATE TABLE cola_sincronizacion (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              id_usuario INTEGER,
+              tipo_entidad TEXT NOT NULL,
+              operacion TEXT NOT NULL,
+              datos_json TEXT,
+              local_uuid TEXT UNIQUE,
+              estado TEXT DEFAULT 'pendiente',
+              fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+              intentos_sync INTEGER DEFAULT 0,
+              ultimo_error TEXT,
+              FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
+            )
+          ''');
+          print('✅ Tabla cola_sincronizacion creada');
+        }
+        print('✅ Migración v9: Cola de sincronización verificada');
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v9, pero se puede ignorar si ya existe: $e',
+        );
+      }
+    }
+
+    // v10: Agregar columnas contador_usos y limite_usos a textos_dinamicos_audio
+    if (oldVersion < 10) {
+      try {
+        final tableInfo = await db.rawQuery(
+          'PRAGMA table_info(textos_dinamicos_audio)',
+        );
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
+
+        if (!columnNames.contains('contador_usos')) {
+          await db.execute(
+            'ALTER TABLE textos_dinamicos_audio ADD COLUMN contador_usos INTEGER DEFAULT 0',
+          );
+          print('✅ Columna contador_usos agregada a textos_dinamicos_audio');
+        }
+        if (!columnNames.contains('limite_usos')) {
+          await db.execute(
+            'ALTER TABLE textos_dinamicos_audio ADD COLUMN limite_usos INTEGER DEFAULT 100',
+          );
+          print('✅ Columna limite_usos agregada a textos_dinamicos_audio');
+        }
+        print(
+          '✅ Migración v10: Tabla textos_dinamicos_audio actualizada con gestión de usos',
+        );
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v10, pero se puede ignorar si ya existen: $e',
+        );
+      }
+    }
+
+    // v11: Agregar tabla sincronizaciones
+    if (oldVersion < 11) {
+      try {
+        // Verificar si la tabla ya existe
+        final tables = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='sincronizaciones'",
+        );
+
+        if (tables.isEmpty) {
+          await db.execute('''
+            CREATE TABLE sincronizaciones (
+              id_sync INTEGER PRIMARY KEY AUTOINCREMENT,
+              id_usuario INTEGER NOT NULL,
+              fecha_ultima_sync TEXT DEFAULT CURRENT_TIMESTAMP,
+              sincronizado INTEGER DEFAULT 1,
+              FOREIGN KEY(id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
+            )
+          ''');
+          print('✅ Tabla sincronizaciones creada');
+        }
+        print('✅ Migración v11: Tabla sincronizaciones verificada');
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v11, pero se puede ignorar si ya existe: $e',
+        );
+      }
     }
   }
 
@@ -188,26 +503,11 @@ class DatabaseConfig {
     }
   }
 
-  // Cifrar datos sensibles antes de guardar
-  static String encryptData(String plainText) {
-    final key = encrypt.Key.fromUtf8(
-      encryptionPassword.padRight(32).substring(0, 32),
-    );
-    final iv = encrypt.IV.fromLength(16);
-    final encrypter = encrypt.Encrypter(encrypt.AES(key));
-
-    final encrypted = encrypter.encrypt(plainText, iv: iv);
-    return encrypted.base64;
-  }
-
-  // Desencriptar datos
-  static String decryptData(String encryptedText) {
-    final key = encrypt.Key.fromUtf8(
-      encryptionPassword.padRight(32).substring(0, 32),
-    );
-    final encrypter = encrypt.Encrypter(encrypt.AES(key));
-
-    final decrypted = encrypter.decrypt64(encryptedText);
-    return decrypted;
+  /// Resetear base de datos completamente (solo para desarrollo)
+  Future<void> resetDatabase() async {
+    final String path = join(await getDatabasesPath(), dbName);
+    await deleteDatabase(path);
+    _database = null;
+    print('🗑️ Base de datos eliminada y reseteada');
   }
 }

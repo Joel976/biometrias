@@ -30,10 +30,13 @@ class User {
     apellidos: json['apellidos'] as String,
     identificadorUnico:
         (json['identificadorUnico'] ?? json['identificador_unico']) as String,
-    estado: json['estado'] as String,
-    correoElectronico: json['correoElectronico'] as String?,
-    numeroTelefonico: json['numeroTelefonico'] as String?,
-    fechaNacimiento: json['fechaNacimiento'] as String?,
+    estado: (json['estado'] ?? 'activo') as String,
+    correoElectronico:
+        json['correoElectronico'] ?? json['correo_electronico'] as String?,
+    numeroTelefonico:
+        json['numeroTelefonico'] ?? json['numero_telefonico'] as String?,
+    fechaNacimiento:
+        json['fechaNacimiento'] ?? json['fecha_nacimiento'] as String?,
     sexo: json['sexo'] as String?,
   );
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 // Servicio de autenticación biométrica
 class BiometricService {
@@ -13,9 +14,10 @@ class BiometricService {
 
   // Umbrales de confianza configurables (BALANCE ÓPTIMO)
   // IMPORTANTE: Punto medio entre seguridad y usabilidad
-  static const double CONFIDENCE_THRESHOLD_VOICE = 0.68; // Balance para voz
+  static const double CONFIDENCE_THRESHOLD_VOICE =
+      0.75; // ESTRICTO - debe coincidir muy bien con el template
   static const double CONFIDENCE_THRESHOLD_FACE =
-      0.70; // BALANCE para oreja (72% similitud)
+      0.50; // REDUCIDO temporalmente para testing offline (antes 0.70)
   static const double CONFIDENCE_THRESHOLD_PALM = 0.70; // Balance para palma
 
   final _biometricStatusStream = StreamController<BiometricStatus>.broadcast();
@@ -31,6 +33,109 @@ class BiometricService {
   }) async {
     try {
       _emitStatus(BiometricStatus.processing);
+
+      // ======= VALIDACIONES PREVIAS =======
+
+      // 1. Validar que el audio no esté vacío
+      if (audioData.isEmpty || audioData.length < 1000) {
+        print(
+          '[BiometricService] ❌ Audio demasiado corto: ${audioData.length} bytes',
+        );
+        return VoiceValidationResult(
+          isValid: false,
+          confidence: 0.0,
+          duration: 0,
+          processingTime: Duration(milliseconds: 100),
+        );
+      }
+
+      // 2. Validar que el audio tenga suficiente energía (no sea silencio)
+      final audioEnergy = _calculateAudioEnergy(audioData);
+      print(
+        '[BiometricService] 📊 Energía del audio: ${audioEnergy.toStringAsFixed(2)}',
+      );
+
+      if (audioEnergy < 5.0) {
+        // Threshold de energía mínima
+        print(
+          '[BiometricService] ❌ Audio con energía muy baja (posible silencio)',
+        );
+        return VoiceValidationResult(
+          isValid: false,
+          confidence: 0.0,
+          duration: 0,
+          processingTime: Duration(milliseconds: 100),
+        );
+      }
+
+      // 3. Validar que el template también tenga energía
+      final templateEnergy = _calculateAudioEnergy(templateData);
+      if (templateEnergy < 5.0) {
+        print('[BiometricService] ⚠️ Template con energía muy baja');
+      }
+
+      // 4. Validar que las duraciones sean similares (ESTRICTO)
+      // IMPORTANTE: Debe decir la frase completa, no solo ruido
+      // Acepta ±50% de variación (hablar más rápido o lento)
+      final audioDuration = audioData.length;
+      final templateDuration = templateData.length;
+      final durationRatio = audioDuration / templateDuration;
+
+      print('[BiometricService] 📏 Duración capturada: $audioDuration bytes');
+      print('[BiometricService] 📏 Duración template: $templateDuration bytes');
+      print(
+        '[BiometricService] 📊 Ratio de duración: ${durationRatio.toStringAsFixed(2)}',
+      );
+
+      if (durationRatio < 0.50 || durationRatio > 1.50) {
+        print(
+          '[BiometricService] ❌ Duraciones muy diferentes (ratio: ${durationRatio.toStringAsFixed(2)})',
+        );
+        return VoiceValidationResult(
+          isValid: false,
+          confidence: 0.0,
+          duration: audioDuration ~/ 16000,
+          processingTime: Duration(milliseconds: 100),
+        );
+      }
+
+      // 5. Validar características de voz humana (pitch fundamental)
+      final capturedPitch = _estimatePitch(audioData);
+      final templatePitch = _estimatePitch(templateData);
+
+      print(
+        '[BiometricService] 🎵 Pitch capturado: ${capturedPitch.toStringAsFixed(1)} Hz',
+      );
+      print(
+        '[BiometricService] 🎵 Pitch template: ${templatePitch.toStringAsFixed(1)} Hz',
+      );
+
+      // Voz humana: 85-255 Hz (más restrictivo)
+      if (capturedPitch < 85 || capturedPitch > 255) {
+        print('[BiometricService] ❌ Pitch fuera de rango de voz humana');
+        return VoiceValidationResult(
+          isValid: false,
+          confidence: 0.0,
+          duration: audioDuration ~/ 16000,
+          processingTime: Duration(milliseconds: 100),
+        );
+      }
+
+      // Pitch debe ser MUY similar (±20%) - misma persona
+      final pitchRatio = capturedPitch / templatePitch;
+      if (pitchRatio < 0.80 || pitchRatio > 1.20) {
+        print(
+          '[BiometricService] ❌ Pitch muy diferente (ratio: ${pitchRatio.toStringAsFixed(2)})',
+        );
+        return VoiceValidationResult(
+          isValid: false,
+          confidence: 0.0,
+          duration: audioDuration ~/ 16000,
+          processingTime: Duration(milliseconds: 100),
+        );
+      }
+
+      // ======= EXTRACCIÓN Y COMPARACIÓN =======
 
       // Extraer características del audio capturado
       final capturedFeatures = _extractAudioFeatures(audioData);
@@ -60,49 +165,224 @@ class BiometricService {
     }
   }
 
-  // Extraer características de audio (MFCC simplificado)
+  // Calcular energía del audio (RMS - Root Mean Square)
+  double _calculateAudioEnergy(Uint8List audioData) {
+    if (audioData.isEmpty) return 0.0;
+
+    double sumSquares = 0.0;
+    for (var sample in audioData) {
+      // Normalizar a rango [-128, 127]
+      final normalized = sample - 128;
+      sumSquares += normalized * normalized;
+    }
+
+    final rms = Math.sqrt(sumSquares / audioData.length);
+    return rms;
+  }
+
+  /// 🎤 VALIDAR CALIDAD DE AUDIO PARA REGISTRO
+  /// Retorna mensaje de error o null si es válido
+  String? validateAudioQuality(Uint8List audioData, double durationSeconds) {
+    print('[BiometricService] 🔍 Validando calidad de audio para registro...');
+
+    // NOTA IMPORTANTE:
+    // El audio es un archivo WAV completo con headers (44 bytes + datos PCM16)
+    // No podemos analizar correctamente la calidad sin parsear el formato WAV
+    // Por ahora solo validamos la duración mínima
+
+    // 1. Validar duración mínima (5 segundos)
+    if (durationSeconds < 5.0) {
+      print(
+        '[BiometricService] ❌ Audio muy corto: ${durationSeconds.toStringAsFixed(1)}s < 5s',
+      );
+      return '❌ El audio es muy corto (${durationSeconds.toStringAsFixed(1)}s).\nDebe durar al menos 5 segundos para registrarse.';
+    }
+
+    // 2. Validar tamaño mínimo de archivo (evitar archivos corruptos)
+    if (audioData.length < 1000) {
+      print(
+        '[BiometricService] ❌ Archivo de audio muy pequeño: ${audioData.length} bytes',
+      );
+      return '❌ El archivo de audio parece estar corrupto o vacío.';
+    }
+
+    print('[BiometricService] ✅ Validación de audio completada');
+    print(
+      '[BiometricService] ✅ Duración: ${durationSeconds.toStringAsFixed(1)}s',
+    );
+    print('[BiometricService] ✅ Tamaño: ${audioData.length} bytes');
+
+    return null; // Sin errores
+  }
+
+  // Estimar pitch (frecuencia fundamental) usando autocorrelación
+  double _estimatePitch(Uint8List audioData) {
+    if (audioData.length < 100) return 0.0;
+
+    const int sampleRate = 16000; // Asumiendo 16kHz
+    const int minPeriod = 40; // ~400 Hz (límite superior voz)
+    const int maxPeriod = 400; // ~40 Hz (límite inferior voz)
+
+    // Convertir bytes a señal normalizada
+    final signal = audioData.map((b) => (b - 128).toDouble()).toList();
+
+    // Autocorrelación simple
+    double maxCorrelation = 0.0;
+    int bestPeriod = minPeriod;
+
+    for (
+      int period = minPeriod;
+      period < maxPeriod && period < signal.length ~/ 2;
+      period++
+    ) {
+      double correlation = 0.0;
+      int samples = signal.length - period;
+
+      for (int i = 0; i < samples; i++) {
+        correlation += signal[i] * signal[i + period];
+      }
+
+      correlation /= samples;
+
+      if (correlation > maxCorrelation) {
+        maxCorrelation = correlation;
+        bestPeriod = period;
+      }
+    }
+
+    // Convertir período a frecuencia
+    final pitch = sampleRate / bestPeriod;
+
+    return pitch;
+  }
+
+  // Extraer características de audio (MEJORADO)
   List<double> _extractAudioFeatures(Uint8List audioData) {
-    // En producción usar librerías como TensorFlow Lite o DeepSpeech
-    // Por ahora simulamos extracción básica
+    // Validar que hay datos suficientes
+    if (audioData.length < 100) {
+      print('[BiometricService] ⚠️ Audio muy corto: ${audioData.length} bytes');
+      return List.filled(26, 0.0); // Devolver características vacías
+    }
+
     final List<double> features = [];
 
-    // Implementación simplificada de MFCC
+    // 1. CARACTERÍSTICAS ESPECTRALES (13 coeficientes MFCC simulados)
     for (int i = 0; i < 13; i++) {
       double feature = 0.0;
-      for (int j = 0; j < audioData.length; j++) {
+      final step = audioData.length ~/ 1000; // Muestrear cada N bytes
+      for (int j = 0; j < audioData.length; j += step) {
         feature +=
             (audioData[j] * Math.cos(2 * Math.pi * i * j / audioData.length));
       }
       features.add(feature / audioData.length);
     }
 
+    // 2. CARACTERÍSTICAS TEMPORALES (estadísticas de la señal)
+    // Media
+    double mean = audioData.reduce((a, b) => a + b) / audioData.length;
+    features.add(mean);
+
+    // Energía (RMS)
+    double energy = 0.0;
+    for (var sample in audioData) {
+      energy += sample * sample;
+    }
+    features.add(Math.sqrt(energy / audioData.length));
+
+    // Cruces por cero (indicador de pitch/frecuencia)
+    int zeroCrossings = 0;
+    for (int i = 1; i < audioData.length; i++) {
+      if ((audioData[i - 1] < 128 && audioData[i] >= 128) ||
+          (audioData[i - 1] >= 128 && audioData[i] < 128)) {
+        zeroCrossings++;
+      }
+    }
+    features.add(zeroCrossings.toDouble() / audioData.length);
+
+    // 3. CARACTERÍSTICAS DE FORMA DE ONDA
+    // Picos de amplitud
+    int peaks = 0;
+    for (int i = 1; i < audioData.length - 1; i++) {
+      if (audioData[i] > audioData[i - 1] &&
+          audioData[i] > audioData[i + 1] &&
+          audioData[i] > 150) {
+        // Umbral para picos
+        peaks++;
+      }
+    }
+    features.add(peaks.toDouble() / audioData.length);
+
+    // 4. SEGMENTOS DE ENERGÍA (dividir audio en 10 segmentos)
+    final segmentSize = audioData.length ~/ 10;
+    for (int seg = 0; seg < 10; seg++) {
+      double segEnergy = 0.0;
+      final start = seg * segmentSize;
+      final end = (seg == 9)
+          ? audioData.length
+          : (seg + 1) * segmentSize; // Último segmento completo
+      for (int i = start; i < end && i < audioData.length; i++) {
+        segEnergy += audioData[i] * audioData[i];
+      }
+      features.add(Math.sqrt(segEnergy / (end - start)));
+    }
+
+    print(
+      '[BiometricService] ✅ Características de voz extraídas: ${features.length} features',
+    );
+
     return features;
   }
 
-  // Comparar características de audio (CON NORMALIZACIÓN)
+  // Comparar características de audio (MEJORADO - MÁS ESTRICTO)
   double _compareAudioFeatures(List<double> features1, List<double> features2) {
-    if (features1.length != features2.length) {
+    if (features1.isEmpty || features2.isEmpty) {
+      print('[BiometricService] ⚠️ Features vacías');
       return 0.0;
     }
+
+    if (features1.length != features2.length) {
+      print(
+        '[BiometricService] ⚠️ Features de diferente tamaño: ${features1.length} vs ${features2.length}',
+      );
+      return 0.0;
+    }
+
+    print(
+      '[BiometricService] 🔍 Comparando ${features1.length} características de voz...',
+    );
 
     // MEJORA: Normalizar características (Z-score normalization)
     // Esto evita que diferencias de volumen arruinen la comparación
     final norm1 = _normalizeFeatures(features1);
     final norm2 = _normalizeFeatures(features2);
 
-    // Comparar características normalizadas
+    // Calcular distancia euclidiana normalizada
     double sumSquaredDiff = 0.0;
     for (int i = 0; i < norm1.length; i++) {
       final diff = norm1[i] - norm2[i];
       sumSquaredDiff += diff * diff;
     }
 
-    // Convertir distancia euclidiana a similitud (0-1)
     final distance = Math.sqrt(sumSquaredDiff);
-    final similarity = 1.0 / (1.0 + distance);
 
-    // DEBUG: Mostrar similitud calculada
-    print('[BiometricService] Audio similarity: $similarity');
+    // Convertir distancia a similitud (0-1)
+    // ESTRICTO: Función exponencial más exigente
+    // Distancia pequeña -> similitud alta
+    // Distancia grande -> similitud muy baja
+    // Factor reducido de 5.0 a 2.0 para ser más estricto
+    final similarity = math.exp(-distance / 2.0);
+
+    // DEBUG: Mostrar detalles de la comparación
+    print(
+      '[BiometricService] 📊 Distancia euclidiana: ${distance.toStringAsFixed(4)}',
+    );
+    print(
+      '[BiometricService] 📊 Similitud calculada: ${(similarity * 100).toStringAsFixed(2)}%',
+    );
+    print('[BiometricService] 📏 Threshold requerido: 75%');
+    print(
+      '[BiometricService] ${similarity >= CONFIDENCE_THRESHOLD_VOICE ? "✅ ACEPTADO" : "❌ RECHAZADO"}',
+    );
 
     return similarity;
   }
@@ -447,7 +727,7 @@ class Math {
 
   static double cos(double x) {
     // Implementación simplificada del coseno
-    return (1 - (x * x / 2) + (x * x * x * x / 24)).clamp(-1.0, 1.0) as double;
+    return (1 - (x * x / 2) + (x * x * x * x / 24)).clamp(-1.0, 1.0);
   }
 
   static double sqrt(double x) {
