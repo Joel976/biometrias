@@ -491,11 +491,31 @@ class SyncManager {
               '[SyncManager] 📦 Agrupadas ${credencialesGrupo.length} credenciales de $tipoBiometria',
             );
 
-            // Extraer todas las imágenes/audios
+            // 🔥 LÍMITE: Solo enviar las primeras N credenciales necesarias
+            final int maxCredenciales = tipoBiometria == 'oreja' ? 7 : 6;
+
+            if (credencialesGrupo.length > maxCredenciales) {
+              print(
+                '[SyncManager] ⚠️ Hay ${credencialesGrupo.length} credenciales, pero solo se necesitan $maxCredenciales',
+              );
+              print(
+                '[SyncManager] 📌 Tomando solo las primeras $maxCredenciales credenciales',
+              );
+            }
+
+            // Extraer solo las primeras N imágenes/audios necesarias
             final List<Uint8List> templates = [];
             final List<int> idsToMark = [];
+            int contador = 0;
 
             for (var cred in credencialesGrupo) {
+              if (contador >= maxCredenciales) {
+                // Ya tenemos suficientes, marcar el resto como procesados sin enviar
+                final credId = cred['id'] ?? 0;
+                idsToMark.add(credId);
+                continue;
+              }
+
               final credDatos = cred['datos_parsed'] ?? {};
               final template = credDatos['template'] as List?;
               final credId = cred['id'] ?? 0;
@@ -510,6 +530,7 @@ class SyncManager {
                 );
                 templates.add(templateBytes);
                 idsToMark.add(credId);
+                contador++;
               }
             }
 
@@ -597,6 +618,27 @@ class SyncManager {
             uploadedCount += idsToMark.length;
 
             print('[SyncManager] ✅ Grupo de $tipoBiometria completado');
+
+            // 🔥 LIMPIAR credenciales duplicadas de la base de datos
+            // Mantener solo las primeras 7 (oreja) o 6 (voz)
+            try {
+              // Obtener id_usuario desde el identificador
+              final usuario = await _localDb.getUserByIdentifier(identificador);
+              if (usuario != null) {
+                final idUsuario = usuario['id_usuario'] as int;
+                final deletedCount = await _localDb.deleteExtraCredentials(
+                  idUsuario,
+                  tipoBiometria,
+                );
+                if (deletedCount > 0) {
+                  print(
+                    '[SyncManager] 🗑️ $deletedCount credenciales extras eliminadas de la BD local',
+                  );
+                }
+              }
+            } catch (e) {
+              print('[SyncManager] ⚠️ Error limpiando credenciales extras: $e');
+            }
           } else if (tipo == 'validacion' || tipo.contains('validacion')) {
             // 🔥 TEMPORAL: Saltar validaciones para evitar timeouts
             // Las validaciones son datos históricos de logins, no son críticos para el registro

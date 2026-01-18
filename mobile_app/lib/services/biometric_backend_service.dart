@@ -34,6 +34,7 @@ class BiometricBackendService {
   );
 
   // Cliente Dio para el backend principal (API REST en puerto 3001)
+  // ignore: unused_field
   final Dio _dioApi = Dio(
     BaseOptions(
       baseUrl: 'http://167.71.155.9:3001/api',
@@ -255,8 +256,10 @@ class BiometricBackendService {
     try {
       print('[BiometricBackend] 🗑️ Eliminando usuario: $identificador');
 
-      final response = await _dioApi.post(
-        '/auth/usuario/eliminar',
+      // Usar el endpoint del backend de OREJA (puerto 8080)
+      // POST http://167.71.155.9:8080/eliminar?identificador=XXX
+      final response = await _dioOreja.post(
+        '/eliminar',
         queryParameters: {'identificador': identificador},
       );
 
@@ -269,15 +272,17 @@ class BiometricBackendService {
   }
 
   /// 4) Restaurar usuario
-  /// POST /auth/usuario/restaurar?identificador=XXX
+  /// POST http://167.71.155.9:8080/restaurar?identificador=XXX
   Future<Map<String, dynamic>> restaurarUsuario({
     required String identificador,
   }) async {
     try {
       print('[BiometricBackend] ♻️ Restaurando usuario: $identificador');
 
-      final response = await _dioApi.post(
-        '/auth/usuario/restaurar',
+      // Usar el endpoint del backend de OREJA (puerto 8080)
+      // POST http://167.71.155.9:8080/restaurar?identificador=XXX
+      final response = await _dioOreja.post(
+        '/restaurar',
         queryParameters: {'identificador': identificador},
       );
 

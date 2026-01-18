@@ -28,9 +28,11 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
   final _adminService = AdminSettingsService();
   bool _isOnline = true;
   bool _showSyncBanner = false;
+  bool _showOfflineBanner = false; // 🆕 Control específico para banner offline
   late SyncManager _syncManager;
   Timer? _connectivityCheckTimer;
   Timer? _settingsCheckTimer;
+  Timer? _offlineBannerTimer; // 🆕 Timer para ocultar banner offline
   int _checkCount = 0; // Contador de verificaciones
   bool _isChecking = false; // Para animar el cambio de color
   AdminSettings? _settings;
@@ -88,7 +90,11 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
             '🌐✅ ¡RECONEXIÓN DETECTADA! Iniciando sincronización automática...',
           );
 
-          // Mostrar banner cuando se reconecta
+          // Ocultar banner offline
+          _showOfflineBanner = false;
+          _offlineBannerTimer?.cancel();
+
+          // Mostrar banner de sincronización cuando se reconecta
           _showSyncBanner = true;
           Future.delayed(Duration(seconds: 2), () {
             if (mounted) setState(() => _showSyncBanner = false);
@@ -106,6 +112,17 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
               });
         } else if (!_isOnline) {
           print('🌐❌ Conexión perdida - modo offline');
+
+          // 🆕 Mostrar banner offline solo por 5 segundos
+          _showOfflineBanner = true;
+          _offlineBannerTimer?.cancel();
+          _offlineBannerTimer = Timer(Duration(seconds: 5), () {
+            if (mounted) {
+              setState(() {
+                _showOfflineBanner = false;
+              });
+            }
+          });
         }
       });
     });
@@ -136,6 +153,7 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
     WidgetsBinding.instance.removeObserver(this);
     _connectivityCheckTimer?.cancel();
     _settingsCheckTimer?.cancel();
+    _offlineBannerTimer?.cancel(); // 🆕 Cancelar timer de banner offline
     super.dispose();
   }
 
@@ -196,6 +214,20 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
       if (mounted) {
         setState(() {
           _isOnline = isOnline;
+
+          // 🆕 Si NO tiene conexión al inicio, mostrar banner por 5 segundos
+          if (!isOnline && wasOnline == isOnline) {
+            // Primera carga sin internet
+            _showOfflineBanner = true;
+            _offlineBannerTimer?.cancel();
+            _offlineBannerTimer = Timer(Duration(seconds: 5), () {
+              if (mounted) {
+                setState(() {
+                  _showOfflineBanner = false;
+                });
+              }
+            });
+          }
         });
       }
 
@@ -247,7 +279,7 @@ class _ConnectivityStatusWidgetState extends State<ConnectivityStatusWidget>
             child: _buildConnectivityBadge(),
           ),
         // Banner de reconexión/sincronización (solo si está habilitado)
-        if (showSyncStatus && (_showSyncBanner || !_isOnline))
+        if (showSyncStatus && (_showSyncBanner || _showOfflineBanner))
           Positioned(
             top: 0,
             left: 0,

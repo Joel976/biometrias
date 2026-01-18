@@ -17,7 +17,25 @@ class EarValidatorService {
   static const int _inputHeight = 224;
   static const int _numChannels = 3;
   static const double _confidenceThreshold =
-      0.65; // 65% de confianza mínima (como tu código original)
+      0.75; // ⬆️ INCREMENTADO de 65% a 75% (mayor precisión para tesis)
+
+  // 📊 DOCUMENTACIÓN DE PARÁMETROS CNN (para tesis - Capítulo 3)
+  static const String MODEL_ARCHITECTURE = '''
+  Arquitectura CNN para clasificación de orejas:
+  - Input: 224x224x3 (RGB)
+  - Modelo: TensorFlow Lite (cuantizado)
+  - Clases: 3 (oreja_clara, oreja_borrosa, no_oreja)
+  - Threshold: 75% confianza mínima
+  - Framework: TFLite para Flutter
+  ''';
+
+  static const Map<String, dynamic> MODEL_PARAMS = {
+    'input_shape': [1, 224, 224, 3],
+    'output_classes': 3,
+    'confidence_threshold': 0.75,
+    'preprocessing': 'resize + normalize [0,1]',
+    'model_file': 'assets/models/modelo_oreja.tflite',
+  };
 
   /// Inicializar el intérprete de TensorFlow Lite
   Future<void> initialize() async {

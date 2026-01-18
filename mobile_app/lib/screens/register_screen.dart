@@ -44,15 +44,74 @@ class _RegisterScreenState extends State<RegisterScreen>
   String? _sexoSeleccionado; // 'M', 'F', 'Otro'
 
   List<Uint8List?> earPhotos = List.filled(7, null); // 7 fotos de oreja
-  List<Uint8List?> voiceAudios = List.filled(6, null); // 6 audios de voz
+  List<Uint8List?> voiceAudios = List.filled(
+    6,
+    null,
+  ); // 6 audios de voz (DOS frases por cada audio)
   Map<int, double> _audioDurations = {}; // Duraciones de audios en segundos
+  int?
+  _recordingAudioIndex; // Índice del audio que se está grabando ACTUALMENTE
+
+  // 🎤 FRASES que el usuario debe decir en cada grabación (2 frases × 6 audios = 12 frases seleccionadas al azar)
+  // Se intentan cargar de la BD/servidor (cuando hay Internet), o se usan estas 50 por defecto
+  List<String> _voicePhrases = [
+    "La biometria de voz es una tecnologia innovadora que protege tu identidad de manera unica y segura",
+    "Tu voz es tan unica como tu huella digital y representa la mejor forma de autenticacion personal",
+    "Cada vez que hablas, tu voz crea un patron biometrico imposible de replicar por otra persona",
+    "La seguridad de tus datos personales comienza con la autenticacion biometrica basada en tu voz natural",
+    "Proteger tu identidad digital nunca fue tan facil gracias a la tecnologia de reconocimiento de voz avanzada",
+    "La biometria vocal analiza caracteristicas unicas de tu voz que son imposibles de falsificar completamente",
+    "Tu voz contiene miles de caracteristicas acusticas que te identifican de forma precisa y confiable",
+    "El futuro de la seguridad digital esta en la autenticacion multimodal que incluye tu voz personal",
+    "Cada palabra que pronuncias genera un patron espectral unico que funciona como tu firma digital personal",
+    "La tecnologia de reconocimiento de voz hace que tus conversaciones sean la llave de tu seguridad digital",
+    "Confiar en tu voz para autenticarte es confiar en la tecnologia mas avanzada de seguridad biometrica actual",
+    "Los sistemas biometricos de voz analizan frecuencias y resonancias que son exclusivas de cada ser humano",
+    "Tu voz es la contrasena mas segura porque combina aspectos fisicos y comportamentales unicos de tu persona",
+    "La autenticacion por voz elimina la necesidad de recordar contrasenas complejas y dificiles de memorizar siempre",
+    "Cada tono y modulacion de tu voz cuenta una historia unica que solo tu puedes narrar autentica",
+    "La biometria vocal representa un avance tecnologico que revoluciona la forma en que protegemos nuestra identidad digital",
+    "Tu voz es un instrumento biometrico natural que te seguira siempre sin necesidad de dispositivos adicionales externos",
+    "Los algoritmos de procesamiento de voz extraen caracteristicas que hacen tu perfil vocal completamente irrepetible y seguro",
+    "La seguridad biometrica basada en voz ofrece comodidad y proteccion sin comprometer la privacidad de los usuarios",
+    "Cada registro de tu voz fortalece el modelo biometrico que garantiza una autenticacion mas precisa y confiable",
+    "La tecnologia de texto dinamico asegura que cada autenticacion sea diferente evitando ataques de reproduccion de audio",
+    "Tu voz es la manifestacion sonora de tu identidad fisica que ningun impostor puede replicar fielmente completa",
+    "Los sistemas multimodales combinan voz con otras biometrias para crear capas de seguridad practicamente impenetrables hoy",
+    "Autenticarte con tu voz es tan natural como hablar porque utilizas algo que siempre llevas contigo",
+    "La precision de los sistemas de reconocimiento de voz modernos supera el noventa y nueve por ciento garantizado",
+    "Cada frecuencia fundamental de tu voz es determinada por la estructura unica de tu aparato fonador personal",
+    "La biometria de voz funciona incluso cuando tienes un resfriado leve porque analiza multiples caracteristicas acusticas complementarias",
+    "Tu patron vocal es tan distintivo que puede identificarte entre millones de personas con exactitud impresionante cientifica",
+    "Los coeficientes MFCC extraidos de tu voz capturan la esencia acustica que define tu identidad vocal unica",
+    "La autenticacion biometrica de voz es el equilibrio perfecto entre seguridad robusta y facilidad de uso cotidiano",
+    "Cada ves que pronuncias una frase el sistema aprende mas sobre tu perfil vocal mejorando continuamente",
+    "La tecnologia de reconocimiento de locutor distingue tu voz de imitaciones y grabaciones fraudulentas con precision notable",
+    "Tu voz transporta informacion biometrica en cada fonema que pronuncias creando una firma acustica personal inigualable siempre",
+    "Los algoritmos de aprendizaje automatico transforman tu voz en vectores numericos que representan tu identidad digital segura",
+    "La biometria vocal democratiza el acceso a sistemas seguros sin requerir hardware especializado costoso o complicado para usuarios",
+    "Cada caracteristica espectral de tu voz es un elemento del rompecabezas que forma tu perfil biometrico completo",
+    "La autenticacion por voz con texto dinamico garantiza que cada validacion sea un desafio nuevo e irrepetible siempre",
+    "Tu voz es el resultado de la combinacion unica de tu anatomia vocal y tus patrones de habla aprendidos",
+    "Los sistemas biometricos de voz protegen contra el fraude utilizando analisis en tiempo real de multiples parametros acusticos",
+    "Cada autenticacion exitosa con tu voz refuerza la confianza del sistema en tu identidad legitima y autentica",
+    "La biometria de voz es una tecnologia no invasiva que respeta tu privacidad mientras protege tu seguridad digital",
+    "Tu tracto vocal actua como un filtro acustico unico que modula el sonido de manera irrepetible para otros",
+    "Los sistemas modernos de reconocimiento de voz son robustos ante ruido ambiental y variaciones en el canal de transmision",
+    "Cada muestra de audio que proporcionas contribuye a crear un modelo biometrico mas preciso y confiable para ti",
+    "La autenticacion multimodal que incluye voz ofrece seguridad en capas que es extremadamente dificil de comprometer totalmente",
+    "Tu voz es una biometria comportamental que refleja no solo tu fisiologia sino tambien tu forma unica de expresarte",
+    "Los vectores de caracteristicas extraidos de tu voz forman una representacion matematica unica de tu identidad vocal personal",
+    "La tecnologia de texto dinamico evita ataques de repeticion obligando a pronunciar frases nuevas en cada autenticacion siempre",
+    "Tu voz es la herramienta biometrica mas conveniente porque siempre esta disponible sin necesidad de dispositivos fisicos adicionales",
+    "Cada parametro acustico de tu voz contribuye a la construccion de un perfil biometrico robusto y seguro definitivo",
+  ];
 
   int _currentStep = 0; // 0: datos, 1: fotos oreja, 2: audio voz
   bool _isLoading = false;
   String? _errorMessage;
   bool _isOnline = true;
   int? _playingAudioIndex; // Índice del audio que se está reproduciendo
-  bool _isRecordingNow = false; // ✅ NUEVO: Tracking de estado de grabación
 
   /// Verifica si se puede avanzar al siguiente paso (según configuración de admin)
   bool _canProceedToNextStep() {
@@ -88,7 +147,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         // Verificar que todas las 7 fotos estén capturadas
         return earPhotos.every((photo) => photo != null);
 
-      case 2: // Paso 3: 6 audios de voz
+      case 2: // Paso 3: 6 audios de voz (2 frases cada uno)
         // Verificar que todos los 6 audios estén grabados
         return voiceAudios.every((audio) => audio != null);
 
@@ -103,6 +162,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     WidgetsBinding.instance.addObserver(this);
     _initializeServices();
     _checkConnectivity();
+    _loadVoicePhrases(); // 🎤 Cargar frases de voz de la BD
     _loadExistingUserData(); // Cargar datos si viene de un registro incompleto
 
     // ✅ Agregar listeners para actualizar el estado cuando cambian los campos
@@ -214,6 +274,61 @@ class _RegisterScreenState extends State<RegisterScreen>
           _isOnline = false;
         });
       }
+    }
+  }
+
+  /// 🎤 Cargar frases de voz desde la BD (si hay Internet) o usar las locales
+  Future<void> _loadVoicePhrases() async {
+    try {
+      // Intentar cargar frases desde la base de datos local (sincronizadas)
+      final phrasesFromDb = await _localDb.getVoicePhrases();
+
+      if (phrasesFromDb.isNotEmpty && phrasesFromDb.length >= 12) {
+        setState(() {
+          _voicePhrases = phrasesFromDb.take(12).toList();
+        });
+        debugPrint(
+          '[Register] 🎤 Frases cargadas de BD local: ${_voicePhrases.length} frases',
+        );
+      } else {
+        // ✅ Seleccionar 12 frases ALEATORIAS de las 50 disponibles
+        final allPhrases = List<String>.from(
+          _voicePhrases,
+        ); // Copiar lista completa
+        allPhrases.shuffle(); // Barajar aleatoriamente
+        setState(() {
+          _voicePhrases = allPhrases.take(12).toList(); // Tomar solo 12
+        });
+        debugPrint(
+          '[Register] � Usando 12 frases aleatorias de las 50 por defecto',
+        );
+      }
+
+      // Si hay Internet, intentar sincronizar frases nuevas del servidor
+      if (_isOnline) {
+        _syncVoicePhrasesFromServer();
+      }
+    } catch (e) {
+      debugPrint('[Register] ⚠️ Error cargando frases de voz: $e');
+      // Continuar con frases por defecto aleatorias
+      final allPhrases = List<String>.from(_voicePhrases);
+      allPhrases.shuffle();
+      setState(() {
+        _voicePhrases = allPhrases.take(12).toList();
+      });
+    }
+  }
+
+  /// 🌐 Sincronizar frases de voz desde el servidor (background, no bloquea UI)
+  Future<void> _syncVoicePhrasesFromServer() async {
+    try {
+      // TODO: Implementar endpoint en backend para obtener frases aleatorias
+      // Por ahora, las frases por defecto son suficientes
+      debugPrint(
+        '[Register] 🌐 Sync de frases desde servidor (pendiente implementar endpoint)',
+      );
+    } catch (e) {
+      debugPrint('[Register] ⚠️ Error sincronizando frases desde servidor: $e');
     }
   }
 
@@ -373,7 +488,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         // Detener grabación (WAV sin compresión)
         setState(() {
           _isLoading = true;
-          _isRecordingNow = false; // ✅ Actualizar estado
+          _recordingAudioIndex = null; // ✅ Limpiar índice de grabación
         });
 
         debugPrint('[Register] 🎤 Deteniendo grabación WAV...');
@@ -421,11 +536,12 @@ class _RegisterScreenState extends State<RegisterScreen>
         );
       } else {
         // ▶️ Iniciar grabación (el permiso se solicita dentro de AudioService)
-        debugPrint('[Register] ▶️ Iniciando grabación...');
+        debugPrint('[Register] ▶️ Iniciando grabación audio $audioNumber...');
         await _audioService.startRecording();
 
         setState(() {
-          _isRecordingNow = true; // ✅ Actualizar estado
+          _recordingAudioIndex =
+              audioNumber - 1; // ✅ Marcar SOLO este índice como grabando
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -440,7 +556,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _isRecordingNow = false; // ✅ Actualizar estado
+        _recordingAudioIndex = null; // ✅ Limpiar índice de grabación
         _errorMessage = 'Error en grabación de audio: $e';
       });
     }
@@ -824,7 +940,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     print('[Register] 🎙️ Audios capturados: $audiosCapturados/6');
 
     if (requireAllFields && voiceAudios.any((a) => a == null)) {
-      throw Exception('Por favor graba los 6 audios de voz');
+      throw Exception('Por favor graba los 6 audios de voz requeridos');
     }
 
     // ✅ Si no se requieren todos los campos, permitir guardar sin audios
@@ -1435,9 +1551,25 @@ class _RegisterScreenState extends State<RegisterScreen>
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'Presiona cada botón para grabar. Habla claramente durante 6-20 segundos en cada grabación.',
-          style: TextStyle(color: Colors.grey),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.shade200),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Di cada frase claramente. Presiona el botón para grabar y presiona nuevamente para detener.',
+                  style: TextStyle(fontSize: 13, color: Colors.blue.shade900),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 24),
         for (int i = 0; i < 6; i++)
@@ -1451,107 +1583,211 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   Widget _buildAudioCard(int index) {
     final hasAudio = voiceAudios[index] != null;
+    final isRecordingThisAudio =
+        _recordingAudioIndex == index; // ✅ Solo este audio está grabando
+
     return Card(
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 🎤 FRASE QUE DEBE DECIR EL USUARIO
             Container(
-              width: 60,
-              height: 60,
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: hasAudio
-                    ? Colors.green.shade100
-                    : (_isRecordingNow
-                          ? Colors.red.shade100
-                          : Colors.blue.shade100),
+                color: isRecordingThisAudio
+                    ? Colors.red.shade50
+                    : (hasAudio ? Colors.green.shade50 : Colors.amber.shade50),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: hasAudio
-                      ? Colors.green
-                      : (_isRecordingNow ? Colors.red : Colors.blue),
+                  color: isRecordingThisAudio
+                      ? Colors.red.shade300
+                      : (hasAudio
+                            ? Colors.green.shade300
+                            : Colors.amber.shade300),
                   width: 2,
                 ),
               ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _recordVoice(index + 1),
-                  customBorder: const CircleBorder(),
-                  child: Icon(
-                    hasAudio
-                        ? Icons.check
-                        : (_isRecordingNow ? Icons.stop : Icons.mic),
-                    size: 30,
-                    color: hasAudio
-                        ? Colors.green
-                        : (_isRecordingNow ? Colors.red : Colors.blue),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Audio ${index + 1}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.record_voice_over,
+                        color: isRecordingThisAudio
+                            ? Colors.red.shade700
+                            : (hasAudio
+                                  ? Colors.green.shade700
+                                  : Colors.amber.shade700),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isRecordingThisAudio
+                              ? '🎤 GRABANDO - Di las frases:'
+                              : (hasAudio
+                                    ? '✅ Frases grabadas:'
+                                    : '📝 Di estas 2 frases:'),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: isRecordingThisAudio
+                                ? Colors.red.shade900
+                                : (hasAudio
+                                      ? Colors.green.shade900
+                                      : Colors.amber.shade900),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
+                  // 🎤 FRASE 1 de 2
                   Text(
-                    hasAudio
-                        ? '✅ Grabado (${_audioDurations[index]?.toStringAsFixed(1) ?? '0.0'}s)'
-                        : (_isRecordingNow
-                              ? '🎤 Grabando...'
-                              : 'Presiona para grabar'),
+                    '1️⃣ "${_voicePhrases[index * 2]}"',
                     style: TextStyle(
-                      color: hasAudio
-                          ? Colors.green
-                          : (_isRecordingNow ? Colors.red : Colors.grey),
-                      fontSize: 14,
+                      fontSize: 15,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w600,
+                      color: isRecordingThisAudio
+                          ? Colors.red.shade800
+                          : (hasAudio
+                                ? Colors.green.shade800
+                                : Colors.amber.shade900),
                     ),
                   ),
-                  // ✅ NUEVO: Mostrar tamaño del archivo
-                  if (hasAudio && voiceAudios[index] != null)
-                    Text(
-                      'Tamaño: ${(voiceAudios[index]!.length / 1024).toStringAsFixed(1)} KB',
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  const SizedBox(height: 8),
+                  // 🎤 FRASE 2 de 2
+                  Text(
+                    '2️⃣ "${_voicePhrases[index * 2 + 1]}"',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w600,
+                      color: isRecordingThisAudio
+                          ? Colors.red.shade800
+                          : (hasAudio
+                                ? Colors.green.shade800
+                                : Colors.amber.shade900),
                     ),
+                  ),
                 ],
               ),
             ),
-            // ✅ NUEVO: Botón de reproducción
-            if (hasAudio && _playingAudioIndex != index)
-              IconButton(
-                icon: const Icon(Icons.play_arrow, color: Colors.blue),
-                tooltip: 'Reproducir',
-                onPressed: () => _playAudio(index),
-              ),
-            // ✅ NUEVO: Botón de detener reproducción
-            if (_playingAudioIndex == index)
-              IconButton(
-                icon: const Icon(Icons.stop, color: Colors.orange),
-                tooltip: 'Detener',
-                onPressed: _stopAudio,
-              ),
-            // Botón de eliminar
-            if (hasAudio && _playingAudioIndex != index)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                tooltip: 'Eliminar',
-                onPressed: () {
-                  setState(() {
-                    voiceAudios[index] = null;
-                    _audioDurations.remove(index);
-                  });
-                },
-              ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                // Botón de grabación
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: hasAudio
+                        ? Colors.green.shade100
+                        : (isRecordingThisAudio // ✅ SOLO este botón en rojo
+                              ? Colors.red.shade100
+                              : Colors.blue.shade100),
+                    border: Border.all(
+                      color: hasAudio
+                          ? Colors.green
+                          : (isRecordingThisAudio ? Colors.red : Colors.blue),
+                      width: 2,
+                    ),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => _recordVoice(index + 1),
+                      customBorder: const CircleBorder(),
+                      child: Icon(
+                        hasAudio
+                            ? Icons.check
+                            : (isRecordingThisAudio ? Icons.stop : Icons.mic),
+                        size: 30,
+                        color: hasAudio
+                            ? Colors.green
+                            : (isRecordingThisAudio ? Colors.red : Colors.blue),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Audio ${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        hasAudio
+                            ? '✅ Grabado (${_audioDurations[index]?.toStringAsFixed(1) ?? '0.0'}s)'
+                            : (isRecordingThisAudio
+                                  ? '🎤 Grabando...'
+                                  : 'Presiona para grabar'),
+                        style: TextStyle(
+                          color: hasAudio
+                              ? Colors.green
+                              : (isRecordingThisAudio
+                                    ? Colors.red
+                                    : Colors.grey),
+                          fontSize: 14,
+                        ),
+                      ),
+                      // ✅ Mostrar tamaño del archivo
+                      if (hasAudio && voiceAudios[index] != null)
+                        Text(
+                          'Tamaño: ${(voiceAudios[index]!.length / 1024).toStringAsFixed(1)} KB',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // ✅ Botón de reproducción
+                if (hasAudio &&
+                    _playingAudioIndex != index &&
+                    !isRecordingThisAudio)
+                  IconButton(
+                    icon: const Icon(Icons.play_arrow, color: Colors.blue),
+                    tooltip: 'Reproducir',
+                    onPressed: () => _playAudio(index),
+                  ),
+                // ✅ Botón de detener reproducción
+                if (_playingAudioIndex == index)
+                  IconButton(
+                    icon: const Icon(Icons.stop, color: Colors.orange),
+                    tooltip: 'Detener',
+                    onPressed: _stopAudio,
+                  ),
+                // Botón de eliminar
+                if (hasAudio &&
+                    _playingAudioIndex != index &&
+                    !isRecordingThisAudio)
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    tooltip: 'Eliminar',
+                    onPressed: () {
+                      setState(() {
+                        voiceAudios[index] = null;
+                        _audioDurations.remove(index);
+                      });
+                    },
+                  ),
+              ],
+            ),
           ],
         ),
       ),

@@ -4,7 +4,7 @@ import 'package:path/path.dart';
 class DatabaseConfig {
   static const String dbName = 'biometrics_local.db';
   static const int dbVersion =
-      11; // v11: Agregar tabla sincronizaciones para rastrear estado de sync por usuario
+      12; // v12: Agregar columna embedding a credenciales_biometricas para comparación offline
 
   static final DatabaseConfig _instance = DatabaseConfig._internal();
 
@@ -492,6 +492,32 @@ class DatabaseConfig {
       } catch (e) {
         print(
           '⚠️ Error en migración v11, pero se puede ignorar si ya existe: $e',
+        );
+      }
+    }
+
+    // v12: Agregar columna embedding a credenciales_biometricas
+    if (oldVersion < 12) {
+      try {
+        final tableInfo = await db.rawQuery(
+          'PRAGMA table_info(credenciales_biometricas)',
+        );
+        final columnNames = tableInfo
+            .map((col) => col['name'] as String)
+            .toList();
+
+        if (!columnNames.contains('embedding')) {
+          await db.execute(
+            'ALTER TABLE credenciales_biometricas ADD COLUMN embedding TEXT',
+          );
+          print('✅ Columna embedding agregada a credenciales_biometricas');
+        }
+        print(
+          '✅ Migración v12: Embeddings del backend disponibles para comparación offline',
+        );
+      } catch (e) {
+        print(
+          '⚠️ Error en migración v12, pero se puede ignorar si ya existe: $e',
         );
       }
     }

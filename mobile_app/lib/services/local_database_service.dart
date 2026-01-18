@@ -65,6 +65,62 @@ class LocalDatabaseService {
     );
   }
 
+  /// 🔥 Eliminar credenciales duplicadas, manteniendo solo las primeras N
+  /// Oreja: mantiene 7, Voz: mantiene 6
+  Future<int> deleteExtraCredentials(
+    int idUsuario,
+    String tipoBiometria,
+  ) async {
+    final db = await _db;
+    final int maxCredenciales = tipoBiometria == 'oreja' ? 7 : 6;
+
+    // Obtener TODAS las credenciales del tipo
+    final credenciales = await db.query(
+      'credenciales_biometricas',
+      where: 'id_usuario = ? AND tipo_biometria = ?',
+      whereArgs: [idUsuario, tipoBiometria],
+      orderBy: 'id_credencial ASC', // Las más antiguas primero
+    );
+
+    if (credenciales.length <= maxCredenciales) {
+      print(
+        '[LocalDB] ✅ Solo hay ${credenciales.length} credenciales de $tipoBiometria (no hay extras)',
+      );
+      return 0;
+    }
+
+    // Mantener solo las primeras N, eliminar el resto
+    final List<int> idsToKeep = credenciales
+        .take(maxCredenciales)
+        .map((c) => c['id_credencial'] as int)
+        .toList();
+
+    final List<int> idsToDelete = credenciales
+        .skip(maxCredenciales)
+        .map((c) => c['id_credencial'] as int)
+        .toList();
+
+    print(
+      '[LocalDB] 🗑️ Eliminando ${idsToDelete.length} credenciales extras de $tipoBiometria',
+    );
+    print('[LocalDB] 📌 Manteniendo credenciales: $idsToKeep');
+
+    int deletedCount = 0;
+    for (var id in idsToDelete) {
+      await db.delete(
+        'credenciales_biometricas',
+        where: 'id_credencial = ?',
+        whereArgs: [id],
+      );
+      deletedCount++;
+    }
+
+    print(
+      '[LocalDB] ✅ $deletedCount credenciales extras eliminadas de la base de datos',
+    );
+    return deletedCount;
+  }
+
   // =============== FRASES DE AUDIO ===============
 
   Future<int> insertAudioPhrase(AudioPhrase phrase) async {
@@ -790,5 +846,75 @@ class LocalDatabaseService {
     print(
       '[LocalDB] 💀 Eliminación permanente completada: $deletedUser usuario, $deletedCredentials credenciales, $deletedQueue registros de cola',
     );
+  }
+
+  // =============== FRASES DE VOZ ===============
+
+  /// 🎤 Obtener frases de voz para el registro (desde tabla voice_phrases)
+  /// Si no hay en la BD, retorna lista vacía y se usan las por defecto
+  Future<List<String>> getVoicePhrases() async {
+    try {
+      final db = await _db;
+
+      // Verificar si la tabla existe
+      final tableExists = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='voice_phrases'",
+      );
+
+      if (tableExists.isEmpty) {
+        print(
+          '[LocalDB] ⚠️ Tabla voice_phrases no existe, usando frases por defecto',
+        );
+        return [];
+      }
+
+      final result = await db.query(
+        'voice_phrases',
+        orderBy: 'RANDOM()', // Orden aleatorio para variedad
+        limit: 12, // 2 frases × 6 audios = 12 frases
+      );
+
+      if (result.isEmpty) {
+        print(
+          '[LocalDB] ⚠️ No hay frases en voice_phrases, usando frases por defecto',
+        );
+        return [];
+      }
+
+      final phrases = result.map((row) => row['phrase'] as String).toList();
+
+      print('[LocalDB] 🎤 ${phrases.length} frases de voz cargadas de BD');
+      return phrases;
+    } catch (e) {
+      print('[LocalDB] ❌ Error obteniendo frases de voz: $e');
+      return [];
+    }
+  }
+
+  /// 💾 Guardar frases de voz sincronizadas desde el servidor
+  Future<void> saveVoicePhrases(List<String> phrases) async {
+    try {
+      final db = await _db;
+
+      // Crear tabla si no existe
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS voice_phrases (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          phrase TEXT NOT NULL UNIQUE,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      ''');
+
+      // Insertar frases (ignorar si ya existen)
+      for (final phrase in phrases) {
+        await db.insert('voice_phrases', {
+          'phrase': phrase,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+
+      print('[LocalDB] 💾 ${phrases.length} frases de voz guardadas');
+    } catch (e) {
+      print('[LocalDB] ❌ Error guardando frases de voz: $e');
+    }
   }
 }

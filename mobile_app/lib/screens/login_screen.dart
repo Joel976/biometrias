@@ -589,15 +589,29 @@ class _LoginScreenState extends State<LoginScreen> {
               );
               return;
             } else {
-              // ❌ Autenticación en nube fallida - NO lanzar excepción, continuar a fallback local
+              // ❌ Autenticación en nube RECHAZADA - NO usar fallback local
               final mensaje = result['mensaje'] ?? 'Biometría no coincide';
 
-              print('[Login] ❌ Autenticación en nube fallida: $mensaje');
+              print('[Login] ❌ Autenticación en nube RECHAZADA: $mensaje');
               print(
-                '[Login] 🔄 Continuando con validación local como fallback...',
+                '[Login] ⛔ Backend respondió negativamente - NO usar fallback local',
               );
 
-              // NO lanzar excepción aquí - dejar que continúe al fallback local
+              // Registrar intento fallido en auditoría
+              final validation = BiometricValidation(
+                id: 0,
+                idUsuario: idUsuario,
+                tipoBiometria: 'oreja',
+                resultado: 'fallido',
+                modoValidacion: 'online_cloud',
+                timestamp: DateTime.now(),
+                puntuacionConfianza: (result['margen'] ?? 0.0).toDouble(),
+                duracionValidacion: 0,
+              );
+              await localDb.insertValidation(validation);
+
+              // ⛔ DETENER EL PROCESO - No continuar a fallback local
+              throw Exception('❌ Autenticación rechazada: $mensaje');
             }
           } else {
             // Voz - Backend Cloud
@@ -665,7 +679,7 @@ class _LoginScreenState extends State<LoginScreen> {
               );
               return;
             } else {
-              // 🎤 Mostrar mensaje detallado del backend
+              // 🎤 Autenticación de voz RECHAZADA por backend - NO usar fallback local
               final data =
                   result['data'] ?? result; // Compatibilidad con ambos formatos
 
@@ -674,28 +688,63 @@ class _LoginScreenState extends State<LoginScreen> {
               final userId = data['user_id'];
               final userName = data['user_name'];
 
-              print('[Login] ❌ Autenticación en nube fallida');
+              print('[Login] ❌ Autenticación en nube RECHAZADA');
               print('[Login] 📝 Frase esperada: $fraseEsperada');
               print('[Login] 🎙️ Transcripción: $transcripcion');
               print('[Login] 👤 Usuario identificado: $userName (ID: $userId)');
               print(
-                '[Login] 🔄 Continuando con validación local como fallback...',
+                '[Login] ⛔ Backend respondió negativamente - NO usar fallback local',
               );
 
-              // NO lanzar excepción - continuar al fallback local
+              // Registrar intento fallido en auditoría
+              final validation = BiometricValidation(
+                id: 0,
+                idUsuario: idUsuario,
+                tipoBiometria: 'voz',
+                resultado: 'fallido',
+                modoValidacion: 'online_cloud',
+                timestamp: DateTime.now(),
+                puntuacionConfianza: (result['margen'] ?? 0.0).toDouble(),
+                duracionValidacion: 0,
+              );
+              await localDb.insertValidation(validation);
+
+              // ⛔ DETENER EL PROCESO - No continuar a fallback local
+              throw Exception(
+                '❌ Autenticación rechazada. Voz no coincide o texto incorrecto.',
+              );
             }
           }
         }
       } catch (e) {
         print('[Login] ⚠️ Error en autenticación cloud: $e');
-        // Si falló la nube, intentar fallback local
+
+        // ⛔ Si el backend respondió (aunque rechazó), RE-LANZAR la excepción
+        // NO permitir que continúe al fallback local
+        if (cloudAuthAttempted) {
+          print('[Login] ❌ Backend rechazó autenticación - Deteniendo proceso');
+          print(
+            '[Login] ⛔ NO se usará fallback local (backend tuvo la última palabra)',
+          );
+          rethrow; // Re-lanzar la excepción para detener el flujo
+        }
+
+        // Si llegamos aquí, el error fue por CONEXIÓN (no por rechazo del backend)
+        print(
+          '[Login] 🔌 Error de conexión al backend - Se permitirá fallback local',
+        );
       }
 
       // ==========================================
-      // 🔄 FALLBACK: Autenticación local (solo si nube no está disponible)
+      // 🔄 FALLBACK: Autenticación local (SOLO si backend NO respondió)
       // ==========================================
-      if (!cloudAuthAttempted || !cloudAuthSuccess) {
-        print('[Login] 🔄 Usando validación local como fallback...');
+      // ✅ CORRECCIÓN: Solo usar fallback si NO se pudo contactar al backend
+      // NO usar fallback si el backend respondió y rechazó la autenticación
+      if (!cloudAuthAttempted) {
+        print(
+          '[Login] 🔄 Backend no disponible - Usando validación local como fallback...',
+        );
+        print('[Login] ℹ️ Razón: Sin Internet o backend no responde');
 
         // Ejecutar validación local según tipo biométrico
         if (_selectedBiometricType == 1) {
@@ -758,7 +807,7 @@ class _LoginScreenState extends State<LoginScreen> {
           print(
             '[Login] 🏆 MEJOR RESULTADO: Confianza = ${(bestConfidence * 100).toStringAsFixed(2)}%',
           );
-          print('[Login] 📏 Threshold requerido: 70%');
+          print('[Login] 📏 Threshold requerido: 90% (algoritmo robusto 512D)');
 
           final bool success = bestResult?.isValid ?? false;
 

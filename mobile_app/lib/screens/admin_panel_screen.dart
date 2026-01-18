@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
 import '../services/local_database_service.dart';
@@ -140,10 +141,18 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       // Obtener todos los usuarios locales
       final localUsers = await _dbService.getAllUsers();
 
-      // Verificar conexión al backend
-      final isOnline = await _backendService.isOnline();
+      // Verificar conectividad de red (sin intentar conectarse al backend)
+      final connectivity = Connectivity();
+      final connectivityResult = await connectivity.checkConnectivity();
+      final hasNetworkConnection =
+          connectivityResult.isNotEmpty &&
+          connectivityResult.first != ConnectivityResult.none;
 
-      if (!isOnline) {
+      if (!hasNetworkConnection) {
+        // Sin conexión de red - todos los usuarios locales son "offline only"
+        print(
+          '[AdminPanel] ⚠️ Sin conexión de red. Mostrando todos los usuarios locales como offline.',
+        );
         setState(() {
           _offlineOnlyUsers = localUsers;
           _isLoadingOfflineUsers = false;
@@ -153,6 +162,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         );
         return;
       }
+
+      // Con conexión - comparar con backend para encontrar usuarios SOLO offline
+      print('[AdminPanel] 🌐 Conexión detectada. Comparando con backend...');
 
       // Obtener usuarios del backend
       final dio = Dio(

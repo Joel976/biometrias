@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../widgets/app_logo.dart';
 import 'login_screen.dart';
+import 'metrics_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -70,6 +71,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     Icons.security,
                     'Seguridad',
                     'Encriptación AES-256 implementada',
+                  ),
+                  const SizedBox(height: 12),
+                  // 📊 NUEVO: Botón para métricas de tesis
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MetricsScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.analytics),
+                    label: const Text('📊 Ver Métricas Biométricas'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 50),
+                    ),
                   ),
                 ],
               ),

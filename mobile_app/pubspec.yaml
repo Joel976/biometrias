@@ -49,6 +49,9 @@ dependencies:
   # Machine Learning
   tflite_flutter: ^0.11.0
 
+  # FFI for native libraries
+  ffi: ^2.1.0
+
   # Location
   geolocator: ^14.0.2
   geocoding: ^4.0.0
