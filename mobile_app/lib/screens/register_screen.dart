@@ -10,10 +10,13 @@ import '../services/ear_validator_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
 import '../services/biometric_service.dart';
+import '../services/native_voice_service.dart';
 import '../models/biometric_models.dart';
 import '../widgets/app_logo.dart';
 import 'login_screen.dart';
 import 'camera_capture_screen.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class RegisterScreen extends StatefulWidget {
   final String? identificadorInicial; // Para continuar registro incompleto
@@ -958,54 +961,80 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     final identificador = _identificadorController.text.trim();
 
-    // 📱 GUARDAR PLANTILLAS DE VOZ LOCALMENTE PRIMERO (para validación offline)
+    // 📱 REGISTRAR BIOMETRÍA DE VOZ USANDO libvoz_mobile.so (SVM)
     print('[Register] ═══════════════════════════════════════');
-    print('[Register] 💾 GUARDANDO EN SQLITE LOCAL');
+    print('[Register] 💾 REGISTRANDO VOZ CON libvoz_mobile.so (SVM)');
     print('[Register] ═══════════════════════════════════════');
 
-    // Obtener ID del usuario local
-    final userMap = await _localDb.getUserByIdentifier(identificador);
-    if (userMap == null) {
-      throw Exception('Usuario no encontrado en base de datos local');
+    final nativeService = NativeVoiceService();
+    final initialized = await nativeService.initialize();
+
+    if (!initialized) {
+      throw Exception(
+        'Error inicializando libvoz_mobile.so. Verifica que los modelos SVM estén copiados.',
+      );
     }
 
-    final idUsuario = userMap['id_usuario'] as int;
-    print('[Register] 👤 ID Usuario SQLite: $idUsuario');
+    // Obtener directorio temporal para guardar audios
+    final tempDir = await getTemporaryDirectory();
 
     int plantillasGuardadas = 0;
     for (int i = 0; i < voiceAudios.length; i++) {
       final audio = voiceAudios[i];
       if (audio != null) {
         try {
-          // Crear credencial biométrica
-          final credential = BiometricCredential(
-            id: 0, // Auto-increment
-            idUsuario: idUsuario,
-            tipoBiometria: 'voz', // Cambiado de 'audio' a 'voz'
-            template: audio.toList(), // Convertir Uint8List a List<int>
-            versionAlgoritmo: '1.0',
-            validezHasta: DateTime.now().add(
-              Duration(days: 365),
-            ), // Válido por 1 año
-            calidadCaptura: 0.85, // Calidad estimada
+          print(
+            '[Register] 🎤 Registrando audio de voz #${i + 1}/6 con SVM...',
           );
 
-          // Guardar en SQLite
-          await _localDb.insertBiometricCredential(credential);
-          plantillasGuardadas++;
-          print(
-            '[Register] ✅ Plantilla voz #${i + 1} guardada (${audio.length} bytes)',
+          // Guardar audio temporal
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final audioPath =
+              '${tempDir.path}/register_voice_${i}_$timestamp.wav';
+          final audioFile = File(audioPath);
+          await audioFile.writeAsBytes(audio);
+
+          // Registrar con libvoz_mobile.so (entrenará el SVM)
+          final resultado = await nativeService.registerBiometric(
+            identificador: identificador,
+            audioPath: audioPath,
+            idFrase: (i % 2) + 1, // Alternar entre frase 1 y 2
           );
+
+          // Limpiar archivo temporal
+          try {
+            await audioFile.delete();
+          } catch (e) {
+            print('[Register] ⚠️ No se pudo eliminar archivo temporal: $e');
+          }
+
+          // ✅ CORREGIDO: La clave correcta es 'success', no 'exito'
+          if (resultado['success'] == true) {
+            plantillasGuardadas++;
+            print(
+              '[Register] ✅ Audio #${i + 1} registrado exitosamente con SVM (${audio.length} bytes)',
+            );
+            print('[Register] 📊 Resultado: ${resultado.toString()}');
+          } else {
+            print(
+              '[Register] ! Audio #${i + 1}: ${resultado['error_message'] ?? resultado['error'] ?? 'Error desconocido'}',
+            );
+            print('[Register] 🔍 Detalles completos: ${resultado.toString()}');
+          }
         } catch (e) {
           print('[Register] ❌ Error guardando plantilla voz #${i + 1}: $e');
         }
       }
     }
     print(
-      '[Register] 💾 Total plantillas guardadas en SQLite: $plantillasGuardadas/6',
+      '[Register] 💾 Total plantillas registradas con SVM: $plantillasGuardadas/6',
     );
 
-    // 🔥 SIEMPRE AGREGAR A COLA DE SINCRONIZACIÓN (online u offline)
+    // Obtener ID del usuario para cola de sincronización
+    final userMap = await _localDb.getUserByIdentifier(identificador);
+    final idUsuario = userMap?['id_usuario'] as int? ?? 0;
+
+    // 🔥 AGREGAR A COLA DE SINCRONIZACIÓN (si es necesario)
     print('[Register] 📋 Agregando audios a cola de sincronización...');
     try {
       final audiosParaEnviar = voiceAudios.whereType<Uint8List>().toList();

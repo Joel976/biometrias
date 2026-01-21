@@ -97,6 +97,8 @@ flutter:
     - assets/icons/
     - assets/sounds/
     - assets/models/
+    - assets/models/v1/
+    - assets/caracteristicas/v1/
 
   fonts:
     - family: Roboto

@@ -7,6 +7,7 @@ import '../services/biometric_service.dart';
 import '../services/ear_validator_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
+import '../services/native_voice_service.dart';
 import '../models/biometric_models.dart';
 import '../widgets/app_logo.dart';
 import 'register_screen.dart';
@@ -14,6 +15,8 @@ import 'home_screen.dart';
 import 'camera_capture_screen.dart';
 import 'admin_access_button.dart';
 import 'dart:typed_data';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -852,66 +855,95 @@ class _LoginScreenState extends State<LoginScreen> {
           print(
             '[Login] 📊 Buscando plantillas de voz para usuario ID: $idUsuario',
           );
-          final templates = await localDb.getCredentialsByUserAndType(
-            idUsuario,
-            'voz', // Cambiado de 'audio' a 'voz'
-          );
 
-          print(
-            '[Login] 📦 Plantillas de voz encontradas: ${templates.length}',
-          );
+          // ✅ USAR libvoz_mobile.so para autenticación real con SVM
+          print('[Login] 🎯 Usando libvoz_mobile.so para autenticación...');
 
-          if (templates.isEmpty) {
-            throw Exception('No existen plantillas de voz para este usuario');
+          final nativeService = NativeVoiceService();
+          final initialized = await nativeService.initialize();
+
+          if (!initialized) {
+            throw Exception(
+              'Error inicializando libvoz_mobile.so. Verifica que los modelos SVM estén copiados.',
+            );
           }
 
+          // 🔍 VERIFICAR SI EL USUARIO EXISTE EN LA BIBLIOTECA
+          final identificador = _identifierController.text.trim();
+          final userExists = nativeService.userExists(identificador);
+
+          if (!userExists) {
+            print(
+              '[Login] ⚠️ Usuario $identificador NO tiene modelo entrenado',
+            );
+            throw Exception(
+              'Usuario no registrado. Por favor regístrate primero con 6 audios de voz.',
+            );
+          }
           print(
-            '[Login] 🔍 Comparando audio grabado contra ${templates.length} plantillas...',
+            '[Login] ✅ Usuario $identificador encontrado en libvoz_mobile.so',
           );
 
-          double bestConfidence = 0.0;
-          VoiceValidationResult? bestResult;
-          int templateIndex = 0;
+          // Guardar audio en archivo temporal
+          final tempDir = await getTemporaryDirectory();
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final audioPath = '${tempDir.path}/auth_voice_$timestamp.wav';
 
-          // Obtener frase objetivo (si aplica)
-          final phrase = await localDb.getRandomAudioPhrase(idUsuario);
-          final targetPhrase = phrase?.frase ?? '';
+          final audioFile = File(audioPath);
+          await audioFile.writeAsBytes(_recordedAudio!);
 
-          for (final tpl in templates) {
-            templateIndex++;
-            print(
-              '[Login] 🔄 Comparando contra plantilla de voz #$templateIndex/${templates.length}...',
-            );
+          print('[Login] 💾 Audio guardado en: $audioPath');
+          print('[Login] � Tamaño audio: ${_recordedAudio!.length} bytes');
 
-            final result = await biometricSvc.validateVoice(
-              audioData: _recordedAudio!,
-              targetPhrase: targetPhrase,
-              templateData: Uint8List.fromList(tpl.template),
-            );
+          // Autenticar con la librería nativa
+          final resultado = await nativeService.authenticate(
+            identificador: _identifierController.text.trim(),
+            audioPath: audioPath,
+            idFrase: _currentPhraseId ?? 1,
+          );
 
-            print(
-              '[Login] 📊 Plantilla #$templateIndex: Confianza = ${(result.confidence * 100).toStringAsFixed(2)}%',
-            );
+          // Limpiar archivo temporal
+          try {
+            await audioFile.delete();
+          } catch (e) {
+            print('[Login] ⚠️ No se pudo eliminar archivo temporal: $e');
+          }
 
-            if (result.confidence > bestConfidence) {
-              bestConfidence = result.confidence;
-              bestResult = result;
+          print('[Login] 📊 Resultado de autenticación:');
+          print('[Login] ${resultado.toString()}');
+
+          // 🔍 EXTRAER SCORE NORMALIZADO de all_scores
+          double normalizedScore = 0.0;
+          if (resultado['all_scores'] != null) {
+            final allScores = resultado['all_scores'] as Map<dynamic, dynamic>;
+            if (allScores.isNotEmpty) {
+              // Obtener el score del usuario predicho
+              final predictedClass = resultado['predicted_class'];
+              if (predictedClass != null &&
+                  allScores.containsKey(predictedClass)) {
+                normalizedScore = (allScores[predictedClass] as num).toDouble();
+              } else {
+                // Si no hay predicted_class, usar el score más alto
+                normalizedScore = allScores.values
+                    .map((v) => (v as num).toDouble())
+                    .reduce((a, b) => a > b ? a : b);
+              }
             }
           }
 
-          print(
-            '[Login] 🏆 MEJOR RESULTADO VOZ: Confianza = ${(bestConfidence * 100).toStringAsFixed(2)}%',
-          );
-          print('[Login] 📏 Threshold requerido: 75% (ESTRICTO)');
-
-          final bool success = bestResult?.isValid ?? false;
+          // ⚖️ APLICAR THRESHOLD MANUALMENTE (0.75 = 75%)
+          const double threshold = 0.75;
+          final bool success = normalizedScore >= threshold;
 
           print(
-            '[Login] ${success ? "✅ AUTENTICACIÓN VOZ EXITOSA" : "❌ AUTENTICACIÓN VOZ FALLIDA"}',
+            '[Login] 🏆 Score Normalizado: ${(normalizedScore * 100).toStringAsFixed(2)}%',
           );
-
-          final Duration? _proc2 = bestResult?.processingTime;
-          final int durMs = _proc2 != null ? _proc2.inMilliseconds : 0;
+          print(
+            '[Login] 📏 Threshold SVM: ${(threshold * 100).toStringAsFixed(0)}%',
+          );
+          print(
+            '[Login] ${success ? "✅ AUTENTICACIÓN VOZ EXITOSA (SVM)" : "❌ AUTENTICACIÓN VOZ FALLIDA (SVM)"}',
+          );
 
           final validation = BiometricValidation(
             id: 0,
@@ -920,8 +952,8 @@ class _LoginScreenState extends State<LoginScreen> {
             resultado: success ? 'exito' : 'fallo',
             modoValidacion: 'offline',
             timestamp: DateTime.now(),
-            puntuacionConfianza: bestConfidence,
-            duracionValidacion: durMs,
+            puntuacionConfianza: normalizedScore,
+            duracionValidacion: 0,
           );
 
           await localDb.insertValidation(validation);
@@ -934,8 +966,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 'timestamp': validation.timestamp.toIso8601String(),
               });
 
-          if (!success)
-            throw Exception('Autenticación fallida: voz no coincide');
+          if (!success) {
+            throw Exception(
+              'Autenticación fallida: ${resultado['mensaje'] ?? 'voz no coincide con SVM'}',
+            );
+          }
         }
       } // Cierre del bloque fallback
 
