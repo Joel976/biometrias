@@ -931,8 +931,8 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           }
 
-          // ⚖️ APLICAR THRESHOLD MANUALMENTE (0.75 = 75%)
-          const double threshold = 0.75;
+          // ⚖️ APLICAR THRESHOLD MANUALMENTE (0.99 = 99%)
+          const double threshold = 0.99;
           final bool success = normalizedScore >= threshold;
 
           print(
