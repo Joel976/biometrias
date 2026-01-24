@@ -166,18 +166,34 @@ class DatabaseConfig {
       print('📝 Insertando frases predeterminadas...');
 
       final defaultPhrases = [
-        'Mi voz es mi contraseña',
-        'Autenticación por reconocimiento de voz',
-        'Acceso seguro mediante biometría vocal',
-        'Verificación de identidad por voz',
-        'Sistema de seguridad biométrica',
-        'Ingreso autorizado por voz',
+        'La biometria de voz es una tecnologia innovadora que protege tu identidad de manera unica y segura',
+        'Tu voz es tan unica como tu huella digital y representa la mejor forma de autenticacion personal',
+        'Cada vez que hablas, tu voz crea un patron biometrico imposible de replicar por otra persona',
+        'La seguridad de tus datos personales comienza con la autenticacion biometrica basada en tu voz natural',
+        'Proteger tu identidad digital nunca fue tan facil gracias a la tecnologia de reconocimiento de voz avanzada',
+        'La biometria vocal analiza caracteristicas unicas de tu voz que son imposibles de falsificar completamente',
+        'Tu voz contiene miles de caracteristicas acusticas que te identifican de forma precisa y confiable',
+        'El futuro de la seguridad digital esta en la autenticacion multimodal que incluye tu voz personal',
+        'Cada palabra que pronuncias genera un patron espectral unico que funciona como tu firma digital personal',
+        'La tecnologia de reconocimiento de voz hace que tus conversaciones sean la llave de tu seguridad digital',
+        'Confiar en tu voz para autenticarte es confiar en la tecnologia mas avanzada de seguridad biometrica actual',
+        'Los sistemas biometricos de voz analizan frecuencias y resonancias que son exclusivas de cada ser humano',
+        'Tu voz es la contrasena mas segura porque combina aspectos fisicos y comportamentales unicos de tu persona',
+        'La autenticacion por voz elimina la necesidad de recordar contrasenas complejas y dificiles de memorizar siempre',
+        'Cada tono y modulacion de tu voz cuenta una historia unica que solo tu puedes narrar autentica',
+        'La biometria vocal representa un avance tecnologico que revoluciona la forma en que protegemos nuestra identidad digital',
+        'Tu voz es un instrumento biometrico natural que te seguira siempre sin necesidad de dispositivos adicionales externos',
+        'Los algoritmos de procesamiento de voz extraen caracteristicas que hacen tu perfil vocal completamente irrepetible y seguro',
+        'La seguridad biometrica basada en voz ofrece comodidad y proteccion sin comprometer la privacidad de los usuarios',
+        'Cada registro de tu voz fortalece el modelo biometrico que garantiza una autenticacion mas precisa y confiable',
       ];
 
       for (int i = 0; i < defaultPhrases.length; i++) {
         await db.insert('textos_dinamicos_audio', {
           'frase': defaultPhrases[i],
           'estado_texto': 'activo',
+          'contador_usos': 0,
+          'limite_usos': 150,
         });
       }
 
