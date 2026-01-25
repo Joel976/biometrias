@@ -1,6 +1,5 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'dart:convert';
-import 'native_voice_service.dart';
+import 'native_voice_mobile_service.dart';
 import 'biometric_backend_service.dart';
 import 'backend_service.dart';
 import 'dart:io';
@@ -13,7 +12,7 @@ class HybridAuthService {
   factory HybridAuthService() => _instance;
   HybridAuthService._internal();
 
-  final NativeVoiceService _nativeService = NativeVoiceService();
+  final NativeVoiceMobileService _nativeService = NativeVoiceMobileService();
   final BiometricBackendService _backendService = BiometricBackendService();
   final BackendService _backend = BackendService();
   final Connectivity _connectivity = Connectivity();
@@ -118,7 +117,7 @@ class HybridAuthService {
 
     try {
       // 1. Obtener frase aleatoria para registro
-      final fraseData = _nativeService.getRandomPhrase();
+      final fraseData = await _nativeService.obtenerFraseAleatoria();
       final idFrase = fraseData['id_frase'] as int;
       final frase = fraseData['frase'] as String;
 
@@ -126,7 +125,7 @@ class HybridAuthService {
 
       // 2. Registrar biometría LOCALMENTE (siempre)
       print('[HybridAuthService] 🔐 Registrando biometría local...');
-      final localResult = _nativeService.registerBiometric(
+      final localResult = await _nativeService.registerBiometric(
         identificador: identificador,
         audioPath: audioPath,
         idFrase: idFrase,
@@ -242,7 +241,7 @@ class HybridAuthService {
 
     try {
       // 1. Verificar que el usuario existe
-      final userExists = _nativeService.userExists(identificador);
+      final userExists = _nativeService.usuarioExiste(identificador);
       if (!userExists) {
         print('[HybridAuthService] ❌ Usuario no encontrado');
         return {
@@ -253,7 +252,7 @@ class HybridAuthService {
       }
 
       // 2. Obtener frase para autenticación
-      final fraseData = _nativeService.getRandomPhrase();
+      final fraseData = await _nativeService.obtenerFraseAleatoria();
       final idFrase = fraseData['id_frase'] as int;
       final frase = fraseData['frase'] as String;
 
@@ -299,7 +298,7 @@ class HybridAuthService {
 
       // 4. VALIDACIÓN LOCAL (offline o fallback)
       print('[HybridAuthService] 🔐 Autenticando localmente...');
-      final localResult = _nativeService.authenticate(
+      final localResult = await _nativeService.authenticate(
         identificador: identificador,
         audioPath: audioPath,
         idFrase: idFrase,
@@ -345,6 +344,7 @@ class HybridAuthService {
   // ==========================================================================
 
   /// Sincroniza datos pendientes con el servidor
+  /// ⚠️ PENDIENTE: Adaptar a nueva API de libvoz_mobile.so
   Future<Map<String, dynamic>> syncPendingData() async {
     if (!_isInitialized) {
       throw Exception('Servicio no inicializado');
@@ -356,133 +356,33 @@ class HybridAuthService {
     }
 
     print('[HybridAuthService] 🔄 Iniciando sincronización...');
+    print(
+      '[HybridAuthService] ⚠️ Sincronización manual no implementada en nueva API',
+    );
+    print('[HybridAuthService] ℹ️ Usa SyncManager en su lugar');
 
-    try {
-      // 1. Obtener cola de sincronización
-      final syncQueue = _nativeService.getSyncQueue();
-
-      if (syncQueue.isEmpty) {
-        print('[HybridAuthService] ✅ No hay datos pendientes de sincronizar');
-        return {
-          'success': true,
-          'synced': 0,
-          'pending': 0,
-          'message': 'No hay datos pendientes',
-        };
-      }
-
-      print(
-        '[HybridAuthService] 📋 ${syncQueue.length} items pendientes de sincronización',
-      );
-
-      int syncedCount = 0;
-      int failedCount = 0;
-      int skippedCount = 0;
-      List<String> errors = [];
-
-      // 2. Procesar cada item de la cola
-      for (var item in syncQueue) {
-        try {
-          final idSync = item['id_sync'] as int;
-          final tabla = item['tabla'] as String;
-          final accion = item['accion'] as String;
-          final datosJson = item['datos_json'] as String;
-          final datos = json.decode(datosJson);
-
-          // 🔒 VERIFICAR SI EL USUARIO YA FUE SINCRONIZADO
-          if (tabla == 'usuarios') {
-            final identificador = datos['identificador_unico'] as String;
-
-            if (_syncedUsers.contains(identificador)) {
-              print(
-                '[HybridAuthService] ⏭️ Usuario $identificador ya sincronizado, omitiendo...',
-              );
-
-              // Marcar como sincronizado en la cola local
-              _nativeService.markAsSynced(idSync);
-              skippedCount++;
-              continue;
-            }
-          }
-
-          print(
-            '[HybridAuthService] 🔄 Sincronizando: $tabla ($accion) - ID: $idSync',
-          );
-
-          // Enviar al servidor según la tabla
-          if (tabla == 'usuarios') {
-            final identificador = datos['identificador_unico'] as String;
-
-            await _backend.registerUser(
-              nombres: datos['nombres'] ?? '',
-              apellidos: datos['apellidos'] ?? '',
-              identificadorUnico: identificador,
-            );
-
-            // ✅ Marcar como sincronizado para no repetir
-            _syncedUsers.add(identificador);
-            print(
-              '[HybridAuthService]   🔒 Usuario $identificador marcado como sincronizado',
-            );
-          } else if (tabla == 'credenciales_biometricas') {
-            // TODO: Enviar credencial biométrica al servidor
-            print(
-              '[HybridAuthService]   ⚠️ Sincronización de credenciales no implementada aún',
-            );
-          }
-
-          // Marcar como sincronizado en la cola
-          final marked = _nativeService.markAsSynced(idSync);
-          if (marked) {
-            syncedCount++;
-            print('[HybridAuthService]   ✅ Item $idSync sincronizado');
-          } else {
-            failedCount++;
-            print('[HybridAuthService]   ⚠️ No se pudo marcar item $idSync');
-          }
-        } catch (e) {
-          failedCount++;
-          final errorMsg = 'Error sincronizando item: $e';
-          errors.add(errorMsg);
-          print('[HybridAuthService]   ❌ $errorMsg');
-        }
-      }
-
-      print(
-        '[HybridAuthService] ✅ Sincronización completada: $syncedCount exitosos, $failedCount fallidos, $skippedCount ya sincronizados',
-      );
-
-      return {
-        'success': true,
-        'synced': syncedCount,
-        'failed': failedCount,
-        'skipped': skippedCount,
-        'pending': syncQueue.length - syncedCount - skippedCount,
-        'errors': errors,
-      };
-    } catch (e) {
-      print('[HybridAuthService] ❌ Error en sincronización: $e');
-      return {
-        'success': false,
-        'error': 'Error en sincronización',
-        'details': e.toString(),
-      };
-    }
+    // TODO: Migrar a usar syncPush/syncPull/syncModelo de libvoz_mobile.so
+    return {
+      'success': false,
+      'error': 'Sincronización manual no implementada',
+      'message': 'Usa SyncManager para sincronización automática',
+    };
   }
 
   /// Obtiene el estado de sincronización
+  /// ⚠️ PENDIENTE: Adaptar a nueva API de libvoz_mobile.so
   Future<Map<String, dynamic>> getSyncStatus() async {
     if (!_isInitialized) {
       throw Exception('Servicio no inicializado');
     }
 
-    final syncQueue = _nativeService.getSyncQueue();
-
+    // TODO: Implementar con nueva API
     return {
-      'pending_count': syncQueue.length,
-      'pending_items': syncQueue,
+      'pending_count': 0,
+      'pending_items': [],
       'is_online': _isOnline,
-      'can_sync': _isOnline && syncQueue.isNotEmpty,
+      'can_sync': false,
+      'message': 'Usa SyncManager para gestión de cola',
     };
   }
 
@@ -502,7 +402,7 @@ class HybridAuthService {
       'initialized': _isInitialized,
       'is_online': _isOnline,
       'native_version': _isInitialized ? _nativeService.getVersion() : 'N/A',
-      'last_error': _isInitialized ? _nativeService.getLastError() : 'N/A',
+      'last_error': _isInitialized ? _nativeService.getUltimoError() : 'N/A',
     };
   }
 

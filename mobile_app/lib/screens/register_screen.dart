@@ -10,8 +10,7 @@ import '../services/ear_validator_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
 import '../services/biometric_service.dart';
-import '../services/native_voice_service.dart';
-import '../models/biometric_models.dart';
+import '../services/native_voice_mobile_service.dart';
 import '../widgets/app_logo.dart';
 import 'login_screen.dart';
 import 'camera_capture_screen.dart';
@@ -813,40 +812,8 @@ class _RegisterScreenState extends State<RegisterScreen>
     final idUsuario = userMap['id_usuario'] as int;
     print('[Register] 👤 ID Usuario SQLite: $idUsuario');
 
-    int plantillasGuardadas = 0;
-    for (int i = 0; i < earPhotos.length; i++) {
-      final photo = earPhotos[i];
-      if (photo != null) {
-        try {
-          // Crear credencial biométrica
-          final credential = BiometricCredential(
-            id: 0, // Auto-increment
-            idUsuario: idUsuario,
-            tipoBiometria: 'oreja',
-            template: photo.toList(), // Convertir Uint8List a List<int>
-            versionAlgoritmo: '1.0',
-            validezHasta: DateTime.now().add(
-              Duration(days: 365),
-            ), // Válido por 1 año
-            calidadCaptura: 0.85, // Calidad estimada
-          );
-
-          // Guardar en SQLite
-          await _localDb.insertBiometricCredential(credential);
-          plantillasGuardadas++;
-          print(
-            '[Register] ✅ Plantilla oreja #${i + 1} guardada (${photo.length} bytes)',
-          );
-        } catch (e) {
-          print('[Register] ❌ Error guardando plantilla #${i + 1}: $e');
-        }
-      }
-    }
-    print(
-      '[Register] 💾 Total plantillas guardadas en SQLite: $plantillasGuardadas/7',
-    );
-
-    // 🔥 SIEMPRE AGREGAR A COLA DE SINCRONIZACIÓN (online u offline)
+    // 🔥 SOLO AGREGAR A COLA DE SINCRONIZACIÓN (no guardar directamente en credenciales)
+    // El SyncManager se encargará de procesarlas y enviarlas al backend
     print('[Register] 📋 Agregando fotos a cola de sincronización...');
     try {
       final imagenesParaEnviar = earPhotos.whereType<Uint8List>().toList();
@@ -966,7 +933,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     print('[Register] 💾 REGISTRANDO VOZ CON libvoz_mobile.so (SVM)');
     print('[Register] ═══════════════════════════════════════');
 
-    final nativeService = NativeVoiceService();
+    final nativeService = NativeVoiceMobileService();
     final initialized = await nativeService.initialize();
 
     if (!initialized) {
@@ -1014,7 +981,24 @@ class _RegisterScreenState extends State<RegisterScreen>
             print(
               '[Register] ✅ Audio #${i + 1} registrado exitosamente con SVM (${audio.length} bytes)',
             );
-            print('[Register] 📊 Resultado: ${resultado.toString()}');
+            print('[Register] 📊 Resultado completo: ${resultado.toString()}');
+
+            // 🔍 VERIFICAR SI EL .SO RE-ENTRENA EL MODELO
+            if (resultado.containsKey('samples_trained')) {
+              print(
+                '[Register] 🧠 SVM RE-ENTRENADO con ${resultado['samples_trained']} muestras',
+              );
+              print(
+                '[Register] 🎯 El modelo ahora conoce ${resultado['samples_trained']} audios',
+              );
+            } else {
+              print(
+                '[Register] ⚠️ ADVERTENCIA: El .so NO devolvió samples_trained',
+              );
+              print(
+                '[Register] ⚠️ Esto significa que el modelo NO se re-entrenó',
+              );
+            }
           } else {
             print(
               '[Register] ! Audio #${i + 1}: ${resultado['error_message'] ?? resultado['error'] ?? 'Error desconocido'}',
@@ -1028,6 +1012,26 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
     print(
       '[Register] 💾 Total plantillas registradas con SVM: $plantillasGuardadas/6',
+    );
+
+    // ✅ VALIDAR QUE SE HAYAN REGISTRADO SUFICIENTES AUDIOS
+    const int minAudios = 3; // Mínimo 3 audios para entrenar SVM
+    if (plantillasGuardadas < minAudios) {
+      print(
+        '[Register] ❌ ERROR: Solo se registraron $plantillasGuardadas audios, se necesitan al menos $minAudios',
+      );
+      throw Exception(
+        'Error en registro de voz: Solo se registraron $plantillasGuardadas de 6 audios.\n'
+        'Se necesitan al menos $minAudios audios para entrenar el modelo.\n'
+        'Por favor intenta registrarte nuevamente.',
+      );
+    }
+
+    print(
+      '[Register] ✅ Modelo SVM entrenado localmente con $plantillasGuardadas audios',
+    );
+    print(
+      '[Register] 🎯 Autenticación OFFLINE ahora disponible para este usuario',
     );
 
     // Obtener ID del usuario para cola de sincronización
@@ -1075,6 +1079,9 @@ class _RegisterScreenState extends State<RegisterScreen>
 
         print(
           '[Register] ✅✅✅ Audios de voz registrados en BACKEND exitosamente',
+        );
+        print(
+          '[Register] 📊 Backup en nube completado (opcional para analytics)',
         );
 
         // Marcar items en cola como enviados

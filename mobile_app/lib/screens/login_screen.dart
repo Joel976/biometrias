@@ -7,7 +7,7 @@ import '../services/biometric_service.dart';
 import '../services/ear_validator_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
-import '../services/native_voice_service.dart';
+import '../services/native_voice_mobile_service.dart';
 import '../models/biometric_models.dart';
 import '../widgets/app_logo.dart';
 import 'register_screen.dart';
@@ -856,10 +856,12 @@ class _LoginScreenState extends State<LoginScreen> {
             '[Login] 📊 Buscando plantillas de voz para usuario ID: $idUsuario',
           );
 
-          // ✅ USAR libvoz_mobile.so para autenticación real con SVM
-          print('[Login] 🎯 Usando libvoz_mobile.so para autenticación...');
+          // ✅ USAR libvoz_mobile.so COMPLETO para autenticación real con SVM
+          print(
+            '[Login] 🎯 Usando libvoz_mobile.so completo para autenticación...',
+          );
 
-          final nativeService = NativeVoiceService();
+          final nativeService = NativeVoiceMobileService();
           final initialized = await nativeService.initialize();
 
           if (!initialized) {
@@ -870,7 +872,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
           // 🔍 VERIFICAR SI EL USUARIO EXISTE EN LA BIBLIOTECA
           final identificador = _identifierController.text.trim();
-          final userExists = nativeService.userExists(identificador);
+          final userExists = nativeService.usuarioExiste(identificador);
 
           if (!userExists) {
             print(
@@ -912,38 +914,109 @@ class _LoginScreenState extends State<LoginScreen> {
           print('[Login] 📊 Resultado de autenticación:');
           print('[Login] ${resultado.toString()}');
 
+          // � VERIFICAR NÚMERO DE CLASES EN EL MODELO
+          final allScoresMap =
+              resultado['all_scores'] as Map<dynamic, dynamic>?;
+          if (allScoresMap != null && allScoresMap.length == 1) {
+            print('[Login] ⚠️⚠️⚠️ ADVERTENCIA CRÍTICA ⚠️⚠️⚠️');
+            print('[Login] 🔴 El modelo SVM solo tiene 1 clase (1 usuario)');
+            print(
+              '[Login] 🔴 No se puede validar correctamente con 1 solo usuario',
+            );
+            print(
+              '[Login] 💡 Solución: Registra al menos 2 usuarios diferentes',
+            );
+
+            throw Exception(
+              'El sistema necesita al menos 2 usuarios registrados para funcionar.\n\n'
+              'Actualmente solo hay 1 usuario en el modelo SVM.\n'
+              'Por favor registra otro usuario para habilitar la autenticación.',
+            );
+          }
+
+          // �🔍 VERIFICAR SI HAY ERROR DE MODELO NO CARGADO
+          if (resultado['success'] == false) {
+            final error = resultado['error'] ?? 'Error desconocido';
+            if (error.toString().contains('Modelo no cargado') ||
+                error.toString().contains('No se pudo cargar el modelo')) {
+              print(
+                '[Login] ⚠️ El usuario existe pero no tiene modelo SVM entrenado',
+              );
+              throw Exception(
+                'Modelo de voz no entrenado. Por favor:\n'
+                '1. Elimina tu cuenta actual\n'
+                '2. Regístrate nuevamente con 6 audios de voz\n'
+                '3. Asegúrate de completar TODO el proceso de registro',
+              );
+            } else {
+              throw Exception('Error en autenticación: $error');
+            }
+          }
+
+          // 🔍 OBTENER ID DEL USUARIO ESPERADO en libvoz_mobile.so
+          final expectedUserId = nativeService.obtenerIdUsuario(identificador);
+          if (expectedUserId < 0) {
+            throw Exception(
+              'No se pudo obtener ID del usuario $identificador en libvoz_mobile.so',
+            );
+          }
+          print(
+            '[Login] 🎯 Usuario esperado en SVM: ID $expectedUserId ($identificador)',
+          );
+
+          // 🔍 VERIFICAR QUE predicted_class COINCIDA CON EL USUARIO
+          final predictedClass = resultado['predicted_class'];
+          final authenticated = resultado['authenticated'] as bool? ?? false;
+
+          print('[Login] 🤖 Clase predicha por SVM: $predictedClass');
+          print('[Login] 🔐 Autenticado según librería: $authenticated');
+
+          // ✅ VALIDACIÓN ESTRICTA:
+          // 1. El usuario predicho debe coincidir con el esperado
+          // 2. La librería debe indicar autenticación exitosa
+          final bool isCorrectUser = predictedClass == expectedUserId;
+          final bool success = authenticated && isCorrectUser;
+
+          if (!isCorrectUser) {
+            print(
+              '[Login] ❌ RECHAZO: Voz pertenece al usuario ID $predictedClass, no al ID $expectedUserId',
+            );
+          }
+
           // 🔍 EXTRAER SCORE NORMALIZADO de all_scores
           double normalizedScore = 0.0;
           if (resultado['all_scores'] != null) {
             final allScores = resultado['all_scores'] as Map<dynamic, dynamic>;
             if (allScores.isNotEmpty) {
-              // Obtener el score del usuario predicho
-              final predictedClass = resultado['predicted_class'];
+              // Obtener el score del usuario ESPERADO (no el predicho)
+              if (allScores.containsKey(expectedUserId)) {
+                normalizedScore = (allScores[expectedUserId] as num).toDouble();
+                print(
+                  '[Login] 🏆 Score del usuario correcto ($expectedUserId): ${(normalizedScore * 100).toStringAsFixed(2)}%',
+                );
+              } else {
+                print(
+                  '[Login] ⚠️ No hay score para el usuario esperado ($expectedUserId)',
+                );
+              }
+
+              // Mostrar score del usuario predicho (para debug)
               if (predictedClass != null &&
                   allScores.containsKey(predictedClass)) {
-                normalizedScore = (allScores[predictedClass] as num).toDouble();
-              } else {
-                // Si no hay predicted_class, usar el score más alto
-                normalizedScore = allScores.values
-                    .map((v) => (v as num).toDouble())
-                    .reduce((a, b) => a > b ? a : b);
+                final predictedScore = (allScores[predictedClass] as num)
+                    .toDouble();
+                print(
+                  '[Login] 📊 Score del usuario predicho ($predictedClass): ${(predictedScore * 100).toStringAsFixed(2)}%',
+                );
               }
             }
           }
 
-          // ⚖️ APLICAR THRESHOLD MANUALMENTE (0.99 = 99%)
-          const double threshold = 0.99;
-          final bool success = normalizedScore >= threshold;
-
-          print(
-            '[Login] 🏆 Score Normalizado: ${(normalizedScore * 100).toStringAsFixed(2)}%',
-          );
-          print(
-            '[Login] 📏 Threshold SVM: ${(threshold * 100).toStringAsFixed(0)}%',
-          );
           print(
             '[Login] ${success ? "✅ AUTENTICACIÓN VOZ EXITOSA (SVM)" : "❌ AUTENTICACIÓN VOZ FALLIDA (SVM)"}',
           );
+          print('[Login] � Usuario correcto: ${isCorrectUser ? "SÍ" : "NO"}');
+          print('[Login] 🔐 Autenticado: ${authenticated ? "SÍ" : "NO"}');
 
           final validation = BiometricValidation(
             id: 0,

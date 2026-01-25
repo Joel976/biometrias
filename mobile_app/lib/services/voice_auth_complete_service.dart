@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'svm_classifier_service.dart';
-import 'native_voice_service.dart';
+import 'native_voice_mobile_service.dart';
 
 /// 🎤 Servicio Completo de Autenticación por Voz
 ///
@@ -18,7 +18,7 @@ class VoiceAuthCompleteService {
   factory VoiceAuthCompleteService() => _instance;
   VoiceAuthCompleteService._internal();
 
-  final _nativeService = NativeVoiceService();
+  final _nativeService = NativeVoiceMobileService();
   final _svmClassifier = SVMClassifierService();
 
   bool _isInitialized = false;

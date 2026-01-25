@@ -99,6 +99,8 @@ flutter:
     - assets/models/
     - assets/models/v1/
     - assets/caracteristicas/v1/
+    - lib/entrega_flutter_mobile/assets/models/v1/
+    - lib/entrega_flutter_mobile/assets/caracteristicas/v1/
 
   fonts:
     - family: Roboto

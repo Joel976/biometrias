@@ -134,51 +134,48 @@ int voz_mobile_autenticar(const char* identificador,
 // ============================================================================
 
 /**
- * Obtener cola de sincronizacion pendiente
- * @param cola_json Buffer donde se copiara el JSON de la cola
- * @param buffer_size Tamaño del buffer
- * @return Cantidad de items pendientes, -1 si error
- */
-int voz_mobile_obtener_cola_sincronizacion(char* cola_json, size_t buffer_size);
-
-/**
- * Marcar item como sincronizado
- * @param id_sync ID del item en cola_sincronizacion
- * @return 0 si exito, -1 si error
- */
-int voz_mobile_marcar_sincronizado(int id_sync);
-
-/**
- * Exportar modelo SVM a buffer binario
- * @param buffer Buffer donde se copiara el modelo
- * @param buffer_size Tamaño del buffer (entrada/salida)
- * @return Tamaño real del modelo exportado, -1 si error
- */
-int voz_mobile_exportar_modelo(uint8_t* buffer, size_t* buffer_size);
-
-/**
- * Importar modelo SVM desde buffer binario
- * @param buffer Buffer con el modelo
+ * Push: enviar vectores pendientes al servidor
+ * @param server_url URL del servidor (ej: "http://localhost:8080")
+ * @param resultado_json Buffer donde se copiara el resultado JSON
  * @param buffer_size Tamaño del buffer
  * @return 0 si exito, -1 si error
  */
-int voz_mobile_importar_modelo(const uint8_t* buffer, size_t buffer_size);
+int voz_mobile_sync_push(const char* server_url, char* resultado_json, size_t buffer_size);
 
 /**
- * Exportar dataset procesado a buffer binario
- * @param buffer Buffer donde se copiara el dataset
- * @param buffer_size Tamaño del buffer (entrada/salida)
- * @return Tamaño real del dataset exportado, -1 si error
- */
-int voz_mobile_exportar_dataset(uint8_t* buffer, size_t* buffer_size);
-
-/**
- * Importar dataset procesado desde buffer binario
- * @param buffer Buffer con el dataset
+ * Pull: descargar cambios del servidor (frases, estados)
+ * @param server_url URL del servidor
+ * @param desde Timestamp desde cuando obtener cambios (opcional, "" para todas)
+ * @param resultado_json Buffer donde se copiara el resultado JSON
  * @param buffer_size Tamaño del buffer
  * @return 0 si exito, -1 si error
  */
-int voz_mobile_importar_dataset(const uint8_t* buffer, size_t buffer_size);
+int voz_mobile_sync_pull(const char* server_url, const char* desde, char* resultado_json, size_t buffer_size);
+
+/**
+ * Pull modelo: descargar modelo re-entrenado del servidor
+ * @param server_url URL del servidor
+ * @param identificador Cedula del usuario
+ * @param resultado_json Buffer donde se copiara el resultado JSON
+ * @param buffer_size Tamaño del buffer
+ * @return 0 si exito, -1 si error
+ */
+int voz_mobile_sync_modelo(const char* server_url, const char* identificador, char* resultado_json, size_t buffer_size);
+
+/**
+ * Obtener UUID del dispositivo
+ * @param buffer Buffer donde se copiara el UUID
+ * @param buffer_size Tamaño del buffer
+ * @return 0 si exito, -1 si error
+ */
+int voz_mobile_obtener_uuid_dispositivo(char* buffer, size_t buffer_size);
+
+/**
+ * Establecer UUID del dispositivo
+ * @param uuid UUID a establecer
+ * @return 0 si exito, -1 si error
+ */
+int voz_mobile_establecer_uuid_dispositivo(const char* uuid);
 
 // ============================================================================
 // UTILIDADES
@@ -190,11 +187,6 @@ int voz_mobile_importar_dataset(const uint8_t* buffer, size_t buffer_size);
  * @param buffer_size Tamaño del buffer
  */
 void voz_mobile_obtener_ultimo_error(char* buffer, size_t buffer_size);
-
-/**
- * Limpiar cache y archivos temporales
- */
-void voz_mobile_limpiar_cache();
 
 /**
  * Obtener estadisticas del modelo
