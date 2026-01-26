@@ -11,6 +11,7 @@ import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
 import '../services/biometric_service.dart';
 import '../services/native_voice_mobile_service.dart';
+import '../services/native_ear_mobile_service.dart';
 import '../widgets/app_logo.dart';
 import 'login_screen.dart';
 import 'camera_capture_screen.dart';
@@ -45,7 +46,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _fechaNacimientoController = TextEditingController();
   String? _sexoSeleccionado; // 'M', 'F', 'Otro'
 
-  List<Uint8List?> earPhotos = List.filled(7, null); // 7 fotos de oreja
+  List<Uint8List?> earPhotos = List.filled(5, null); // 5 fotos de oreja
   List<Uint8List?> voiceAudios = List.filled(
     6,
     null,
@@ -114,6 +115,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   String? _errorMessage;
   bool _isOnline = true;
   int? _playingAudioIndex; // Índice del audio que se está reproduciendo
+  String _processingMessage =
+      ''; // Mensaje de progreso durante procesamiento pesado
 
   /// Verifica si se puede avanzar al siguiente paso (según configuración de admin)
   bool _canProceedToNextStep() {
@@ -145,8 +148,8 @@ class _RegisterScreenState extends State<RegisterScreen>
             _sexoSeleccionado != null &&
             _sexoSeleccionado!.isNotEmpty;
 
-      case 1: // Paso 2: 7 fotos de oreja
-        // Verificar que todas las 7 fotos estén capturadas
+      case 1: // Paso 2: 5 fotos de oreja
+        // Verificar que todas las 5 fotos estén capturadas
         return earPhotos.every((photo) => photo != null);
 
       case 2: // Paso 3: 6 audios de voz (2 frases cada uno)
@@ -226,7 +229,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       case 1: // Fotos de oreja
         final fotosFaltantes = earPhotos.where((photo) => photo == null).length;
         if (fotosFaltantes == 0) return '';
-        return '⚠️ Faltan $fotosFaltantes foto${fotosFaltantes > 1 ? 's' : ''} de oreja (7 requeridas)';
+        return '⚠️ Faltan $fotosFaltantes foto${fotosFaltantes > 1 ? 's' : ''} de oreja (5 requeridas)';
 
       case 2: // Audios de voz
         final audiosFaltantes = voiceAudios
@@ -456,10 +459,10 @@ class _RegisterScreenState extends State<RegisterScreen>
         // ✅ NUEVO: Verificar si ya se completaron todas las fotos
         final fotosCompletas = earPhotos.every((photo) => photo != null);
         debugPrint(
-          '[Register] 📸 Foto $photoNumber guardada. Total: ${earPhotos.where((p) => p != null).length}/7. Puede avanzar: $fotosCompletas',
+          '[Register] 📸 Foto $photoNumber guardada. Total: ${earPhotos.where((p) => p != null).length}/5. Puede avanzar: $fotosCompletas',
         );
 
-        // ✅ NUEVO: Si ya completamos las 7 fotos, mostrar mensaje
+        // ✅ NUEVO: Si ya completamos las 5 fotos, mostrar mensaje
         if (fotosCompletas) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -777,10 +780,10 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
 
     final fotosCapturadas = earPhotos.where((p) => p != null).length;
-    print('[Register] 📷 Fotos capturadas: $fotosCapturadas/7');
+    print('[Register] 📷 Fotos capturadas: $fotosCapturadas/5');
 
     if (requireAllFields && earPhotos.any((p) => p == null)) {
-      throw Exception('Por favor captura las 7 fotos de oreja');
+      throw Exception('Por favor captura las 5 fotos de oreja');
     }
 
     // ✅ Si no se requieren todos los campos, permitir guardar sin fotos
@@ -812,7 +815,73 @@ class _RegisterScreenState extends State<RegisterScreen>
     final idUsuario = userMap['id_usuario'] as int;
     print('[Register] 👤 ID Usuario SQLite: $idUsuario');
 
-    // 🔥 SOLO AGREGAR A COLA DE SINCRONIZACIÓN (no guardar directamente en credenciales)
+    // 🔥 PROCESAR FOTOS CON liboreja_mobile.so (LDA + KNN)
+    print('[Register] ═══════════════════════════════════════');
+    print('[Register] 💾 REGISTRANDO OREJAS CON liboreja_mobile.so');
+    print('[Register] ═══════════════════════════════════════');
+
+    try {
+      // ✅ CONSERVAR modelos base de OREJA pre-cargados (igual que VOZ)
+      // - templates_k1.csv: 50 usuarios base para comparación LDA
+      // - caracteristicas_lda_train.csv: Dataset de entrenamiento
+      // - modelo_pca.dat, modelo_lda.dat, zscore_params.dat: Modelos ML
+
+      print(
+        '[Register] ℹ️ Modelos de OREJA pre-cargados conservados (50 usuarios base)',
+      );
+      print(
+        '[Register] ℹ️ Modelos de VOZ pre-cargados conservados (68 clasificadores SVM)',
+      );
+
+      // Inicializar servicio nativo (copiará modelos desde assets si no existen)
+      final nativeEarService = NativeEarMobileService();
+      await nativeEarService.initialize();
+
+      // Guardar fotos temporalmente en disco
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final imagePaths = <String>[];
+
+      for (int i = 0; i < 5; i++) {
+        if (i < earPhotos.length && earPhotos[i] != null) {
+          final photoPath = '${tempDir.path}/register_ear_${i}_$timestamp.jpg';
+          final photoFile = File(photoPath);
+          await photoFile.writeAsBytes(earPhotos[i]!);
+          imagePaths.add(photoPath);
+        }
+      }
+
+      print(
+        '[Register] 📸 Procesando ${imagePaths.length} fotos de oreja con LDA...',
+      );
+
+      // Registrar con liboreja_mobile.so (agregará al templates_k1.csv base)
+      final resultado = await nativeEarService.registerBiometric(
+        identificadorUnico: idUsuario,
+        imagePaths: imagePaths,
+      );
+
+      // Limpiar archivos temporales
+      for (final path in imagePaths) {
+        try {
+          await File(path).delete();
+        } catch (e) {
+          print('[Register] ⚠️ No se pudo eliminar archivo temporal: $e');
+        }
+      }
+
+      if (resultado['success'] == true) {
+        print('[Register] ✅ Orejas registradas con LDA exitosamente');
+        print('[Register] 📊 Resultado: $resultado');
+      } else {
+        print('[Register] ❌ Error registrando orejas: ${resultado['error']}');
+      }
+    } catch (e) {
+      print('[Register] ❌ Error procesando orejas con .so: $e');
+      print('[Register] ⚠️ Continuando con sincronización al backend...');
+    }
+
+    // 🔥 AGREGAR A COLA DE SINCRONIZACIÓN
     // El SyncManager se encargará de procesarlas y enviarlas al backend
     print('[Register] 📋 Agregando fotos a cola de sincronización...');
     try {
@@ -928,9 +997,12 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     final identificador = _identificadorController.text.trim();
 
-    // 📱 REGISTRAR BIOMETRÍA DE VOZ USANDO libvoz_mobile.so (SVM)
+    // 📱 REGISTRAR BIOMETRÍA DE VOZ USANDO libvoz_mobile.so (SVM INCREMENTAL)
     print('[Register] ═══════════════════════════════════════');
-    print('[Register] 💾 REGISTRANDO VOZ CON libvoz_mobile.so (SVM)');
+    print(
+      '[Register] 💾 REGISTRANDO VOZ CON libvoz_mobile.so (SVM INCREMENTAL)',
+    );
+    print('[Register] ⚡ Modo: Entrenamiento incremental optimizado (batch)');
     print('[Register] ═══════════════════════════════════════');
 
     final nativeService = NativeVoiceMobileService();
@@ -945,73 +1017,116 @@ class _RegisterScreenState extends State<RegisterScreen>
     // Obtener directorio temporal para guardar audios
     final tempDir = await getTemporaryDirectory();
 
-    int plantillasGuardadas = 0;
+    // 🚀 PASO 1: Guardar TODOS los audios en archivos temporales primero
+    print('[Register] 📁 Guardando 6 audios en archivos temporales...');
+    final List<String> audioPaths = [];
+
+    setState(() {
+      _processingMessage = '📁 Preparando audios para entrenamiento...';
+    });
+
     for (int i = 0; i < voiceAudios.length; i++) {
       final audio = voiceAudios[i];
       if (audio != null) {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final audioPath = '${tempDir.path}/register_voice_${i}_$timestamp.wav';
+        final audioFile = File(audioPath);
+        await audioFile.writeAsBytes(audio);
+        audioPaths.add(audioPath);
+        print(
+          '[Register] 💾 Audio #${i + 1} guardado: $audioPath (${audio.length} bytes)',
+        );
+      }
+    }
+
+    print('[Register] ✅ ${audioPaths.length} audios listos para entrenamiento');
+
+    // 🚀 PASO 2: Entrenar TODOS los audios EN BATCH (UNA SOLA VEZ)
+    print('[Register] ═══════════════════════════════════════');
+    print('[Register] 🧠 ENTRENAMIENTO BATCH SVM (OPTIMIZADO)');
+    print('[Register] ═══════════════════════════════════════');
+
+    setState(() {
+      _processingMessage =
+          '🧠 Entrenando modelo SVM en batch (${audioPaths.length} audios)...';
+    });
+
+    int plantillasGuardadas = 0;
+    try {
+      print(
+        '[Register] 📤 Enviando ${audioPaths.length} audios al .so en batch...',
+      );
+
+      final stopwatch = Stopwatch()..start();
+
+      // 🚀 LLAMADA BATCH: Entrena UNA SOLA VEZ con todos los audios
+      final resultado = await nativeService.registerBiometricBatch(
+        identificador: identificador,
+        audioPaths: audioPaths,
+      );
+
+      stopwatch.stop();
+
+      print(
+        '[Register] ⏱️ Tiempo total de entrenamiento: ${stopwatch.elapsedMilliseconds}ms',
+      );
+
+      if (resultado['success'] == true) {
+        print('[Register] ✅✅✅ BATCH completado exitosamente');
+        print('[Register] 📊 Resultado: $resultado');
+
+        if (resultado.containsKey('samples_trained')) {
+          print(
+            '[Register] 🧠 SVM entrenado con ${resultado['samples_trained']} muestras totales',
+          );
+        }
+
+        plantillasGuardadas = audioPaths.length;
+      } else {
+        throw Exception(resultado['error'] ?? 'Error en entrenamiento batch');
+      }
+    } catch (e) {
+      print('[Register] ❌ Error en entrenamiento batch: $e');
+
+      // FALLBACK: Si batch falla, intentar uno por uno (compatibilidad)
+      print(
+        '[Register] ⚠️ Intentando entrenamiento secuencial como fallback...',
+      );
+
+      for (int i = 0; i < audioPaths.length; i++) {
         try {
           print(
-            '[Register] 🎤 Registrando audio de voz #${i + 1}/6 con SVM...',
+            '[Register] 🎤 Entrenando audio #${i + 1}/${audioPaths.length}...',
           );
 
-          // Guardar audio temporal
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final audioPath =
-              '${tempDir.path}/register_voice_${i}_$timestamp.wav';
-          final audioFile = File(audioPath);
-          await audioFile.writeAsBytes(audio);
-
-          // Registrar con libvoz_mobile.so (entrenará el SVM)
           final resultado = await nativeService.registerBiometric(
             identificador: identificador,
-            audioPath: audioPath,
-            idFrase: (i % 2) + 1, // Alternar entre frase 1 y 2
+            audioPath: audioPaths[i],
+            idFrase: (i % 2) + 1,
           );
 
-          // Limpiar archivo temporal
-          try {
-            await audioFile.delete();
-          } catch (e) {
-            print('[Register] ⚠️ No se pudo eliminar archivo temporal: $e');
-          }
-
-          // ✅ CORREGIDO: La clave correcta es 'success', no 'exito'
           if (resultado['success'] == true) {
             plantillasGuardadas++;
-            print(
-              '[Register] ✅ Audio #${i + 1} registrado exitosamente con SVM (${audio.length} bytes)',
-            );
-            print('[Register] 📊 Resultado completo: ${resultado.toString()}');
-
-            // 🔍 VERIFICAR SI EL .SO RE-ENTRENA EL MODELO
-            if (resultado.containsKey('samples_trained')) {
-              print(
-                '[Register] 🧠 SVM RE-ENTRENADO con ${resultado['samples_trained']} muestras',
-              );
-              print(
-                '[Register] 🎯 El modelo ahora conoce ${resultado['samples_trained']} audios',
-              );
-            } else {
-              print(
-                '[Register] ⚠️ ADVERTENCIA: El .so NO devolvió samples_trained',
-              );
-              print(
-                '[Register] ⚠️ Esto significa que el modelo NO se re-entrenó',
-              );
-            }
-          } else {
-            print(
-              '[Register] ! Audio #${i + 1}: ${resultado['error_message'] ?? resultado['error'] ?? 'Error desconocido'}',
-            );
-            print('[Register] 🔍 Detalles completos: ${resultado.toString()}');
+            print('[Register] ✅ Audio #${i + 1} registrado');
           }
-        } catch (e) {
-          print('[Register] ❌ Error guardando plantilla voz #${i + 1}: $e');
+        } catch (fallbackError) {
+          print('[Register] ❌ Error en audio #${i + 1}: $fallbackError');
         }
       }
     }
+
+    // 🚀 PASO 3: Limpiar archivos temporales
+    print('[Register] 🧹 Limpiando archivos temporales...');
+    for (final audioPath in audioPaths) {
+      try {
+        await File(audioPath).delete();
+      } catch (e) {
+        print('[Register] ⚠️ No se pudo eliminar $audioPath: $e');
+      }
+    }
+
     print(
-      '[Register] 💾 Total plantillas registradas con SVM: $plantillasGuardadas/6',
+      '[Register] 💾 Total plantillas registradas con SVM: $plantillasGuardadas/${audioPaths.length}',
     );
 
     // ✅ VALIDAR QUE SE HAYAN REGISTRADO SUFICIENTES AUDIOS
@@ -1021,7 +1136,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         '[Register] ❌ ERROR: Solo se registraron $plantillasGuardadas audios, se necesitan al menos $minAudios',
       );
       throw Exception(
-        'Error en registro de voz: Solo se registraron $plantillasGuardadas de 6 audios.\n'
+        'Error en registro de voz: Solo se registraron $plantillasGuardadas de ${audioPaths.length} audios.\n'
         'Se necesitan al menos $minAudios audios para entrenar el modelo.\n'
         'Por favor intenta registrarte nuevamente.',
       );
@@ -1030,6 +1145,12 @@ class _RegisterScreenState extends State<RegisterScreen>
     print(
       '[Register] ✅ Modelo SVM entrenado localmente con $plantillasGuardadas audios',
     );
+
+    // Limpiar mensaje de progreso
+    setState(() {
+      _processingMessage = '';
+    });
+
     print(
       '[Register] 🎯 Autenticación OFFLINE ahora disponible para este usuario',
     );
@@ -1148,7 +1269,27 @@ class _RegisterScreenState extends State<RegisterScreen>
         backgroundColor: Colors.blue,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 24),
+                  if (_processingMessage.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _processingMessage,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -1426,7 +1567,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           style: TextStyle(color: Colors.grey),
         ),
         const SizedBox(height: 24),
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 5; i++)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: _buildPhotoCard(i),
@@ -1438,7 +1579,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   Widget _buildPhotoCard(int index) {
     final hasPhoto = earPhotos[index] != null;
 
-    // Indicaciones específicas para cada foto
+    // Indicaciones específicas para cada foto (REDUCIDO A 5 FOTOS)
     final Map<int, Map<String, String>> photoInstructions = {
       0: {
         'title': '📸 Foto 1: FRONT (Cámara Trasera)',
@@ -1459,14 +1600,6 @@ class _RegisterScreenState extends State<RegisterScreen>
       4: {
         'title': '📸 Foto 5: RIGHT (Cámara Trasera)',
         'instruction': 'Gira la cabeza a la derecha SOLO 10-15 grados',
-      },
-      5: {
-        'title': '📸 Foto 6: ZOOM (Cámara Trasera)',
-        'instruction': 'Acerca el celular para un primer plano de la oreja',
-      },
-      6: {
-        'title': '📸 Foto 7: FRONTAL',
-        'instruction': 'Usa la cámara frontal (selfie) - Oreja visible',
       },
     };
 

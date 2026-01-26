@@ -110,6 +110,40 @@ int voz_mobile_registrar_biometria(const char* identificador,
                                     char* resultado_json,
                                     size_t buffer_size);
 
+/**
+ * Registrar biometria de voz usando ENTRENAMIENTO INCREMENTAL (más rápido)
+ * Solo entrena el clasificador del nuevo usuario sin reentrenar todo el modelo.
+ * Ideal para apps mobile donde el reentrenamiento completo es muy pesado.
+ * @param identificador Cedula del usuario
+ * @param audio_path Ruta al archivo de audio WAV (temporal)
+ * @param id_frase ID de la frase pronunciada
+ * @param resultado_json Buffer donde se copiara el resultado JSON
+ * @param buffer_size Tamaño del buffer de resultado
+ * @return 0 si exito, -1 si error
+ */
+int voz_mobile_registrar_biometria_incremental(const char* identificador,
+                                                const char* audio_path,
+                                                int id_frase,
+                                                char* resultado_json,
+                                                size_t buffer_size);
+
+/**
+ * Registrar biometria de voz en BATCH (ULTRA OPTIMIZADO)
+ * Procesa TODOS los audios y entrena SOLO UNA VEZ al final.
+ * Evita re-entrenar el modelo por cada audio (O(n²) -> O(n)).
+ * @param identificador Cedula del usuario
+ * @param audio_paths Array de rutas a archivos WAV
+ * @param num_audios Cantidad de audios en el array
+ * @param resultado_json Buffer donde se copiara el resultado JSON
+ * @param buffer_size Tamaño del buffer de resultado
+ * @return 0 si exito, -1 si error
+ */
+int voz_mobile_registrar_biometria_batch(const char* identificador,
+                                          const char** audio_paths,
+                                          int num_audios,
+                                          char* resultado_json,
+                                          size_t buffer_size);
+
 // ============================================================================
 // AUTENTICACION
 // ============================================================================

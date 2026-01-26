@@ -405,13 +405,4 @@ class HybridAuthService {
       'last_error': _isInitialized ? _nativeService.getUltimoError() : 'N/A',
     };
   }
-
-  /// Limpia recursos
-  void cleanup() {
-    if (_isInitialized) {
-      _nativeService.cleanup();
-      _isInitialized = false;
-      print('[HybridAuthService] 🧹 Recursos liberados');
-    }
-  }
 }

@@ -615,13 +615,4 @@ class NativeVoiceService {
     malloc.free(buffer);
     return error.isEmpty ? 'Sin error' : error;
   }
-
-  /// Limpia recursos
-  void cleanup() {
-    if (_initialized && _library != null) {
-      _vozMobileCleanup();
-      _initialized = false;
-      print('[NativeVoiceService] 🧹 Recursos liberados');
-    }
-  }
 }

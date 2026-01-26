@@ -222,12 +222,4 @@ class VoiceAuthCompleteService {
       'svm_classifier': _svmClassifier.getStats(),
     };
   }
-
-  /// Liberar recursos
-  void dispose() {
-    _nativeService.cleanup();
-    _svmClassifier.dispose();
-    _isInitialized = false;
-    print('[VoiceAuthComplete] 🗑️ Recursos liberados');
-  }
 }

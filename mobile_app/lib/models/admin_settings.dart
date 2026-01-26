@@ -35,6 +35,8 @@ class AdminSettings {
   bool enableEarValidation; // Nueva: Habilitar validación con TFLite
   bool
   requireAllFieldsInRegistration; // Nueva: Bloquear "Siguiente" si hay campos vacíos
+  bool
+  requireBothBiometricsInLogin; // Nueva: Requerir AMBAS biometrías (oreja Y voz) en el login
 
   // Configuraciones de notificaciones
   int
@@ -64,6 +66,8 @@ class AdminSettings {
     this.enableEarValidation = true, // ✅ HABILITADO para testing
     this.requireAllFieldsInRegistration =
         true, // ✅ Por defecto requiere todos los campos
+    this.requireBothBiometricsInLogin =
+        false, // ✅ Por defecto NO requiere ambas biometrías
     this.offlineMessageIntervalMinutes = 1, // ✅ Mostrar mensaje cada 1 minuto
   });
 
@@ -91,6 +95,7 @@ class AdminSettings {
       'allowMultipleRegistrations': allowMultipleRegistrations,
       'enableEarValidation': enableEarValidation,
       'requireAllFieldsInRegistration': requireAllFieldsInRegistration,
+      'requireBothBiometricsInLogin': requireBothBiometricsInLogin,
       'offlineMessageIntervalMinutes': offlineMessageIntervalMinutes,
     };
   }
@@ -120,6 +125,8 @@ class AdminSettings {
       enableEarValidation: json['enableEarValidation'] ?? false,
       requireAllFieldsInRegistration:
           json['requireAllFieldsInRegistration'] ?? true,
+      requireBothBiometricsInLogin:
+          json['requireBothBiometricsInLogin'] ?? false,
       offlineMessageIntervalMinutes: json['offlineMessageIntervalMinutes'] ?? 1,
     );
   }
@@ -147,6 +154,7 @@ class AdminSettings {
     bool? allowMultipleRegistrations,
     bool? enableEarValidation,
     bool? requireAllFieldsInRegistration,
+    bool? requireBothBiometricsInLogin,
     int? offlineMessageIntervalMinutes,
   }) {
     return AdminSettings(
@@ -178,6 +186,8 @@ class AdminSettings {
       enableEarValidation: enableEarValidation ?? this.enableEarValidation,
       requireAllFieldsInRegistration:
           requireAllFieldsInRegistration ?? this.requireAllFieldsInRegistration,
+      requireBothBiometricsInLogin:
+          requireBothBiometricsInLogin ?? this.requireBothBiometricsInLogin,
       offlineMessageIntervalMinutes:
           offlineMessageIntervalMinutes ?? this.offlineMessageIntervalMinutes,
     );

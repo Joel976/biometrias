@@ -748,6 +748,22 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             },
           ),
           Divider(),
+          SwitchListTile(
+            title: Text('Requerir AMBAS biometrías en login'),
+            subtitle: Text(
+              'Si está activado, el usuario DEBE autenticarse con oreja Y voz para ingresar',
+            ),
+            secondary: Icon(Icons.security, color: Colors.red),
+            value: _settings!.requireBothBiometricsInLogin,
+            onChanged: (value) {
+              setState(() {
+                _settings = _settings!.copyWith(
+                  requireBothBiometricsInLogin: value,
+                );
+              });
+            },
+          ),
+          Divider(),
           ListTile(
             leading: Icon(Icons.lock_clock),
             title: Text('Timeout de sesión'),

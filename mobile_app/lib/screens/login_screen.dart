@@ -1,13 +1,13 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../services/auth_service_fix.dart';
 import '../services/camera_service.dart';
 import '../services/audio_service.dart';
 import '../services/local_database_service.dart';
-import '../services/biometric_service.dart';
 import '../services/ear_validator_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
 import '../services/native_voice_mobile_service.dart';
+import '../services/native_ear_mobile_service.dart';
 import '../models/biometric_models.dart';
 import '../widgets/app_logo.dart';
 import 'register_screen.dart';
@@ -43,14 +43,19 @@ class _LoginScreenState extends State<LoginScreen> {
   int _loginAttempts = 0; // Contador de intentos
   DateTime? _lockoutUntil; // Bloqueo temporal
 
-  // 🎤 Variables para autenticación de voz
-  String? _currentPhrase; // Frase que el usuario debe decir
-  int? _currentPhraseId; // ID de la frase actual
+  // 🔐 NUEVO: Sistema de autenticación dual (oreja + voz)
+  bool _earAuthCompleted = false; // ✅ Si se validó con éxito la oreja
+  bool _voiceAuthCompleted = false; // ✅ Si se validó con éxito la voz
+
+  // 🎤 Variables para autenticación de voz (2 frases)
+  final List<String> _voicePhrases = []; // Lista de 2 frases
+  final List<int> _voicePhraseIds = []; // Lista de 2 IDs
+  String?
+  _currentPhrase; // Frase actual mostrada (no se usa, pero se mantiene por compatibilidad)
+  int?
+  _currentPhraseId; // ID de frase actual (no se usa, pero se mantiene por compatibilidad)
   bool _isLoadingPhrase = false; // Cargando frase desde backend
   bool _isPlayingAudio = false; // Estado de reproducción de audio
-
-  // 📶 Control de mensajes de conectividad
-  DateTime? _lastOfflineMessageTime; // Última vez que se mostró el mensaje
 
   @override
   void initState() {
@@ -93,31 +98,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   /// 📶 Mostrar mensaje de "sin conexión" controlado por intervalo configurable
-  Future<void> _showOfflineMessage(String message) async {
-    final settings = await _adminService.loadSettings();
-    final intervalMinutes = settings.offlineMessageIntervalMinutes;
-
-    // Verificar si ha pasado suficiente tiempo desde el último mensaje
-    final now = DateTime.now();
-    if (_lastOfflineMessageTime != null) {
-      final difference = now.difference(_lastOfflineMessageTime!);
-      if (difference.inMinutes < intervalMinutes) {
-        // No mostrar el mensaje si no ha pasado el intervalo configurado
-        print(
-          '[Login] ⏳ Mensaje offline omitido (faltan ${intervalMinutes - difference.inMinutes} min)',
-        );
-        return;
-      }
-    }
-
-    // Mostrar el mensaje y actualizar el timestamp
-    _lastOfflineMessageTime = now;
-    setState(() {
-      _errorMessage = message;
-    });
-    print('[Login] 📱 Mensaje offline mostrado: $message');
-  }
-
   Future<void> _capturePhotoForAuth() async {
     try {
       setState(() => _isLoading = true);
@@ -281,10 +261,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// 🎤 Cargar frase aleatoria desde el backend para autenticación de voz
+  /// 🎤 Cargar 2 frases aleatorias desde el backend para autenticación de voz
   Future<void> _loadRandomPhrase() async {
     setState(() {
       _isLoadingPhrase = true;
+      _voicePhrases.clear();
+      _voicePhraseIds.clear();
       _currentPhrase = null;
       _currentPhraseId = null;
     });
@@ -294,90 +276,131 @@ class _LoginScreenState extends State<LoginScreen> {
       final isOnline = await backendService.isOnline();
 
       if (isOnline) {
-        print('[Login] 🌐 Obteniendo frase aleatoria del backend...');
+        print('[Login] 🌐 Obteniendo 2 frases aleatorias del backend...');
 
-        final phraseData = await backendService.obtenerFraseAleatoria();
-
-        setState(() {
-          _currentPhraseId = phraseData['id_texto'] ?? phraseData['id'];
-          _currentPhrase = phraseData['frase'];
-          _isLoadingPhrase = false;
-        });
-
-        print(
-          '[Login] ✅ Frase cargada: $_currentPhrase (ID: $_currentPhraseId)',
-        );
+        // Cargar 2 frases diferentes
+        for (int i = 0; i < 2; i++) {
+          final phraseData = await backendService.obtenerFraseAleatoria();
+          _voicePhrases.add(phraseData['frase']);
+          _voicePhraseIds.add(phraseData['id_texto'] ?? phraseData['id']);
+          print('[Login] ✅ Frase ${i + 1}/2 cargada: ${phraseData['frase']}');
+        }
       } else {
-        // 📱 Fallback: usar frase aleatoria de la base de datos local
-        print(
-          '[Login] 📱 Sin conexión, buscando frase en base de datos local...',
-        );
+        // 📱 Modo OFFLINE: leer 2 frases de SQLite local
+        print('[Login] 📱 Modo OFFLINE - leyendo 2 frases de SQLite local...');
 
-        final localDb = LocalDatabaseService();
-        final localPhrase = await localDb.getRandomAudioPhrase(
-          1,
-        ); // idUsuario no se usa realmente
+        final nativeService = NativeVoiceMobileService();
 
-        if (localPhrase != null) {
-          setState(() {
-            _currentPhrase = localPhrase.frase;
-            _currentPhraseId = localPhrase.id;
-            _isLoadingPhrase = false;
-          });
+        // 🔥 Frases largas por defecto (50 frases del registro)
+        final frasesLargas = [
+          "La biometria de voz es una tecnologia innovadora que protege tu identidad de manera unica y segura",
+          "Tu voz es tan unica como tu huella digital y representa la mejor forma de autenticacion personal",
+          "Cada vez que hablas, tu voz crea un patron biometrico imposible de replicar por otra persona",
+          "La seguridad de tus datos personales comienza con la autenticacion biometrica basada en tu voz natural",
+          "Proteger tu identidad digital nunca fue tan facil gracias a la tecnologia de reconocimiento de voz avanzada",
+          "La biometria vocal analiza caracteristicas unicas de tu voz que son imposibles de falsificar completamente",
+          "Tu voz contiene miles de caracteristicas acusticas que te identifican de forma precisa y confiable",
+          "El futuro de la seguridad digital esta en la autenticacion multimodal que incluye tu voz personal",
+          "Cada palabra que pronuncias genera un patron espectral unico que funciona como tu firma digital personal",
+          "La tecnologia de reconocimiento de voz hace que tus conversaciones sean la llave de tu seguridad digital",
+          "Confiar en tu voz para autenticarte es confiar en la tecnologia mas avanzada de seguridad biometrica actual",
+          "Los sistemas biometricos de voz analizan frecuencias y resonancias que son exclusivas de cada ser humano",
+          "Tu voz es la contrasena mas segura porque combina aspectos fisicos y comportamentales unicos de tu persona",
+          "La autenticacion por voz elimina la necesidad de recordar contrasenas complejas y dificiles de memorizar siempre",
+          "Cada tono y modulacion de tu voz cuenta una historia unica que solo tu puedes narrar autentica",
+          "La biometria vocal representa un avance tecnologico que revoluciona la forma en que protegemos nuestra identidad digital",
+          "Tu voz es un instrumento biometrico natural que te seguira siempre sin necesidad de dispositivos adicionales externos",
+          "Los algoritmos de procesamiento de voz extraen caracteristicas que hacen tu perfil vocal completamente irrepetible y seguro",
+          "La seguridad biometrica basada en voz ofrece comodidad y proteccion sin comprometer la privacidad de los usuarios",
+          "Cada registro de tu voz fortalece el modelo biometrico que garantiza una autenticacion mas precisa y confiable",
+          "La tecnologia de texto dinamico asegura que cada autenticacion sea diferente evitando ataques de reproduccion de audio",
+          "Tu voz es la manifestacion sonora de tu identidad fisica que ningun impostor puede replicar fielmente completa",
+          "Los sistemas multimodales combinan voz con otras biometrias para crear capas de seguridad practicamente impenetrables hoy",
+          "Autenticarte con tu voz es tan natural como hablar porque utilizas algo que siempre llevas contigo",
+          "La precision de los sistemas de reconocimiento de voz modernos supera el noventa y nueve por ciento garantizado",
+          "Cada frecuencia fundamental de tu voz es determinada por la estructura unica de tu aparato fonador personal",
+          "La biometria de voz funciona incluso cuando tienes un resfriado leve porque analiza multiples caracteristicas acusticas complementarias",
+          "Tu patron vocal es tan distintivo que puede identificarte entre millones de personas con exactitud impresionante cientifica",
+          "Los coeficientes MFCC extraidos de tu voz capturan la esencia acustica que define tu identidad vocal unica",
+          "La autenticacion biometrica de voz es el equilibrio perfecto entre seguridad robusta y facilidad de uso cotidiano",
+          "Cada ves que pronuncias una frase el sistema aprende mas sobre tu perfil vocal mejorando continuamente",
+          "La tecnologia de reconocimiento de locutor distingue tu voz de imitaciones y grabaciones fraudulentas con precision notable",
+          "Tu voz transporta informacion biometrica en cada fonema que pronuncias creando una firma acustica personal inigualable siempre",
+          "Los algoritmos de aprendizaje automatico transforman tu voz en vectores numericos que representan tu identidad digital segura",
+          "La biometria vocal democratiza el acceso a sistemas seguros sin requerir hardware especializado costoso o complicado para usuarios",
+          "Cada caracteristica espectral de tu voz es un elemento del rompecabezas que forma tu perfil biometrico completo",
+          "La autenticacion por voz con texto dinamico garantiza que cada validacion sea un desafio nuevo e irrepetible siempre",
+          "Tu voz es el resultado de la combinacion unica de tu anatomia vocal y tus patrones de habla aprendidos",
+          "Los sistemas biometricos de voz protegen contra el fraude utilizando analisis en tiempo real de multiples parametros acusticos",
+          "Cada autenticacion exitosa con tu voz refuerza la confianza del sistema en tu identidad legitima y autentica",
+          "La biometria de voz es una tecnologia no invasiva que respeta tu privacidad mientras protege tu seguridad digital",
+          "Tu tracto vocal actua como un filtro acustico unico que modula el sonido de manera irrepetible para otros",
+          "Los sistemas modernos de reconocimiento de voz son robustos ante ruido ambiental y variaciones en el canal de transmision",
+          "Cada muestra de audio que proporcionas contribuye a crear un modelo biometrico mas preciso y confiable para ti",
+          "La autenticacion multimodal que incluye voz ofrece seguridad en capas que es extremadamente dificil de comprometer totalmente",
+          "Tu voz es una biometria comportamental que refleja no solo tu fisiologia sino tambien tu forma unica de expresarte",
+          "Los vectores de caracteristicas extraidos de tu voz forman una representacion matematica unica de tu identidad vocal personal",
+          "La tecnologia de texto dinamico evita ataques de repeticion obligando a pronunciar frases nuevas en cada autenticacion siempre",
+          "Tu voz es la herramienta biometrica mas conveniente porque siempre esta disponible sin necesidad de dispositivos fisicos adicionales",
+          "Cada parametro acustico de tu voz contribuye a la construccion de un perfil biometrico robusto y seguro definitivo",
+        ];
 
-          print(
-            '[Login] ✅ Frase local cargada: $_currentPhrase (ID: $_currentPhraseId)',
-          );
-        } else {
-          // ⚠️ Última opción: frase hardcodeada
-          print(
-            '[Login] ⚠️ No hay frases en base de datos local, usando frase por defecto',
-          );
-          setState(() {
-            _currentPhrase = 'Mi voz es mi contraseña';
-            _currentPhraseId = 1;
-            _isLoadingPhrase = false;
-          });
+        // Cargar 2 frases diferentes
+        for (int i = 0; i < 2; i++) {
+          final phraseData = await nativeService.obtenerFraseAleatoria();
+
+          if (phraseData.containsKey('error')) {
+            // Fallback: usar frases largas aleatorias
+            final randomIndex =
+                DateTime.now().millisecondsSinceEpoch % frasesLargas.length;
+            final randomIndex2 = (randomIndex + 1) % frasesLargas.length;
+
+            _voicePhrases.add(
+              i == 0 ? frasesLargas[randomIndex] : frasesLargas[randomIndex2],
+            );
+            _voicePhraseIds.add(i + 1);
+            print(
+              '[Login] ⚠️ Frase ${i + 1}/2 (fallback): ${_voicePhrases[i].substring(0, 50)}...',
+            );
+          } else {
+            _voicePhrases.add(phraseData['frase']);
+            _voicePhraseIds.add(phraseData['id_frase']);
+            print('[Login] ✅ Frase ${i + 1}/2 local: ${phraseData['frase']}');
+          }
         }
       }
+
+      // Mostrar la primera frase
+      setState(() {
+        _currentPhrase = _voicePhrases[0];
+        _currentPhraseId = _voicePhraseIds[0];
+        _isLoadingPhrase = false;
+      });
+
+      print(
+        '[Login] 📋 2 frases cargadas. Mostrando frase 1/2: $_currentPhrase',
+      );
     } catch (e) {
-      print('[Login] ❌ Error cargando frase: $e');
+      print('[Login] ❌ Error cargando frases: $e');
 
-      // Intentar cargar desde base de datos local como fallback
-      try {
-        final localDb = LocalDatabaseService();
-        final localPhrase = await localDb.getRandomAudioPhrase(1);
+      // Fallback: 2 frases largas aleatorias
+      final frasesLargas = [
+        "La biometria de voz es una tecnologia innovadora que protege tu identidad de manera unica y segura",
+        "Tu voz es tan unica como tu huella digital y representa la mejor forma de autenticacion personal",
+        "La seguridad de tus datos personales comienza con la autenticacion biometrica basada en tu voz natural",
+        "La tecnologia de reconocimiento de voz hace que tus conversaciones sean la llave de tu seguridad digital",
+      ];
 
-        if (localPhrase != null) {
-          setState(() {
-            _currentPhrase = localPhrase.frase;
-            _currentPhraseId = localPhrase.id;
-            _isLoadingPhrase = false;
-          });
-          await _showOfflineMessage(
-            'Usando frase almacenada localmente (sin conexión)',
-          );
-          print('[Login] ✅ Frase local cargada (fallback): $_currentPhrase');
-        } else {
-          // Última opción: frase hardcodeada
-          setState(() {
-            _currentPhrase = 'Mi voz es mi contraseña';
-            _currentPhraseId = 1;
-            _isLoadingPhrase = false;
-            _errorMessage =
-                'No se pudo cargar frase del servidor, usando frase por defecto';
-          });
-        }
-      } catch (dbError) {
-        print('[Login] ❌ Error accediendo a base de datos local: $dbError');
-        // Última opción: frase hardcodeada
-        setState(() {
-          _currentPhrase = 'Mi voz es mi contraseña';
-          _currentPhraseId = 1;
-          _isLoadingPhrase = false;
-          _errorMessage = 'Error cargando frase, usando frase por defecto';
-        });
-      }
+      _voicePhrases.add(frasesLargas[0]);
+      _voicePhrases.add(frasesLargas[1]);
+      _voicePhraseIds.add(1);
+      _voicePhraseIds.add(2);
+
+      setState(() {
+        _currentPhrase = _voicePhrases[0];
+        _currentPhraseId = _voicePhraseIds[0];
+        _isLoadingPhrase = false;
+      });
     }
   }
 
@@ -453,7 +476,6 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     final localDb = LocalDatabaseService();
-    final biometricSvc = BiometricService();
 
     try {
       // Buscar usuario local por identificador
@@ -563,7 +585,7 @@ class _LoginScreenState extends State<LoginScreen> {
             cloudAuthSuccess = authenticated && access;
 
             print('[Login] 📊 Resultado backend (oreja):');
-            print('[Login]    - autenticado: $authenticated');
+            print('[Login]    - authenticated: $authenticated');
             print('[Login]    - access: $access');
             print(
               '[Login]    - Autenticación final: ${cloudAuthSuccess ? "✅ APROBADA" : "❌ RECHAZADA"}',
@@ -751,101 +773,156 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // Ejecutar validación local según tipo biométrico
         if (_selectedBiometricType == 1) {
-          // Oreja
+          // Oreja - Usando liboreja_mobile.so (LDA + KNN)
           if (_capturedPhoto == null) {
             throw Exception('Por favor captura una foto primero');
           }
 
+          print('[Login] 📊 Buscando usuario en liboreja_mobile.so...');
           print(
-            '[Login] 📊 Buscando plantillas de oreja para usuario ID: $idUsuario',
-          );
-          final templates = await localDb.getCredentialsByUserAndType(
-            idUsuario,
-            'oreja',
+            '[Login] 🎯 Usando liboreja_mobile.so completo para autenticación...',
           );
 
-          print('[Login] 📦 Plantillas encontradas: ${templates.length}');
+          // Inicializar servicio nativo con TIMEOUT de 10 segundos
+          final nativeEarService = NativeEarMobileService();
 
-          if (templates.isEmpty) {
-            print('[Login] ❌ ERROR: No hay plantillas de oreja registradas');
+          try {
+            await nativeEarService.initialize().timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {
+                throw Exception(
+                  'Timeout inicializando librería nativa. '
+                  'El archivo templates_k1.csv puede ser muy grande o estar corrupto.',
+                );
+              },
+            );
+            print('[Login] ✅ Servicio nativo inicializado correctamente');
+
+            // 🔄 RECARGAR templates_k1.csv SOLO si han pasado más de 5 minutos desde init
+            // Evita bloquear el C++ con recargas innecesarias
             print(
-              '[Login] 💡 SOLUCIÓN: El usuario debe REGISTRARSE primero con sus 7 fotos de oreja',
-            );
-            throw Exception(
-              'No existen plantillas de oreja registradas para este usuario.\n'
-              'Por favor, registra tus fotos de oreja primero en la pantalla de Registro.',
-            );
-          }
-
-          print(
-            '[Login] 🔍 Comparando foto capturada contra ${templates.length} plantillas...',
-          );
-
-          // Comparar contra cada template y escoger mejor confianza
-          double bestConfidence = 0.0;
-          EarValidationResult? bestResult;
-          int templateIndex = 0;
-
-          for (final tpl in templates) {
-            templateIndex++;
-            print(
-              '[Login] 🔄 Comparando contra plantilla #$templateIndex/${templates.length}...',
+              '[Login] ℹ️ Usando templates ya cargados en memoria (skip reload)',
             );
 
-            final result = await biometricSvc.validateEar(
-              imageData: _capturedPhoto!,
-              templateData: Uint8List.fromList(tpl.template),
-            );
-
-            print(
-              '[Login] 📊 Plantilla #$templateIndex: Confianza = ${(result.confidence * 100).toStringAsFixed(2)}%',
-            );
-
-            if (result.confidence > bestConfidence) {
-              bestConfidence = result.confidence;
-              bestResult = result;
+            /* DESHABILITADO: reloadTemplates() causa bloqueos en C++
+            print('[Login] 🔄 Recargando templates desde disco...');
+            try {
+              await nativeEarService.reloadTemplates().timeout(
+                const Duration(seconds: 5),
+                onTimeout: () {
+                  print(
+                    '[Login] ⚠️ Timeout recargando templates (continuando...)',
+                  );
+                  return false;
+                },
+              );
+            } catch (e) {
+              print(
+                '[Login] ⚠️ Error recargando templates: $e (continuando...)',
+              );
             }
+            */
+          } catch (e) {
+            print('[Login] ❌ Error inicializando servicio nativo: $e');
+            throw Exception(
+              'No se pudo inicializar el sistema de autenticación local. '
+              'Por favor intenta conectarte a Internet o contacta al administrador.',
+            );
           }
 
-          print(
-            '[Login] 🏆 MEJOR RESULTADO: Confianza = ${(bestConfidence * 100).toStringAsFixed(2)}%',
+          // Obtener ID del usuario en el sistema local
+          final userMap = await localDb.getUserByIdentifier(
+            _identifierController.text.trim(),
           );
-          print('[Login] 📏 Threshold requerido: 90% (algoritmo robusto 512D)');
 
-          final bool success = bestResult?.isValid ?? false;
+          if (userMap == null) {
+            throw Exception('Usuario no encontrado en base de datos local');
+          }
 
+          final userId = userMap['id_usuario'] as int;
           print(
-            '[Login] ${success ? "✅ AUTENTICACIÓN EXITOSA" : "❌ AUTENTICACIÓN FALLIDA"}',
+            '[Login] ✅ Usuario ${_identifierController.text.trim()} encontrado (ID: $userId)',
           );
+
+          // Guardar foto temporalmente
+          final tempDir = await getTemporaryDirectory();
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final photoPath = '${tempDir.path}/auth_ear_$timestamp.jpg';
+
+          final photoFile = File(photoPath);
+          await photoFile.writeAsBytes(_capturedPhoto!);
+
+          print('[Login] 💾 Foto guardada en: $photoPath');
+          print('[Login] � Tamaño foto: ${_capturedPhoto!.length} bytes');
+
+          // Autenticar con la librería nativa
+          final resultado = await nativeEarService.authenticate(
+            identificadorClaimed: userId,
+            imagePath: photoPath,
+            umbral: -1.0, // Usar umbral del modelo (EER)
+          );
+
+          // Limpiar archivo temporal
+          try {
+            await photoFile.delete();
+          } catch (e) {
+            print('[Login] ⚠️ No se pudo eliminar archivo temporal: $e');
+          }
+
+          print('[Login] 📊 Resultado de autenticación:');
+          print('[Login] ${resultado.toString()}');
+
+          // Verificar resultado
+          if (resultado['success'] == false) {
+            final error = resultado['error'] ?? 'Error desconocido';
+            throw Exception('Error en autenticación: $error');
+          }
+
+          final autenticado = resultado['autenticado'] as bool? ?? false;
+          final coincide = resultado['coincide'] as bool? ?? false;
+          final scoreClaimed = resultado['score_claimed'] as double? ?? 0.0;
+          final umbralUsado = resultado['umbral'] as double? ?? 0.0;
+
+          print('[Login] 🔐 Autenticado: $autenticado');
+          print('[Login] 🎯 Coincide: $coincide');
+          print('[Login] 📊 Score: ${scoreClaimed.toStringAsFixed(4)}');
+          print('[Login] 📏 Umbral: ${umbralUsado.toStringAsFixed(4)}');
+
+          if (autenticado && coincide) {
+            print('[Login] ✅ AUTENTICACIÓN OREJA EXITOSA (LDA+KNN)');
+          } else {
+            print('[Login] ❌ AUTENTICACIÓN OREJA FALLIDA');
+            print(
+              '[Login] ⚠️ Distancia ($scoreClaimed) > Umbral ($umbralUsado)',
+            );
+          }
 
           // Registrar validación local
-          final Duration? _proc = bestResult?.processingTime;
-          final int durMs = _proc != null ? _proc.inMilliseconds : 0;
-
           final validation = BiometricValidation(
             id: 0,
-            idUsuario: idUsuario,
+            idUsuario: userId,
             tipoBiometria: 'oreja',
-            resultado: success ? 'exito' : 'fallo',
-            modoValidacion: 'offline',
+            resultado: (autenticado && coincide) ? 'exito' : 'fallo',
+            modoValidacion: 'offline_lda',
             timestamp: DateTime.now(),
-            puntuacionConfianza: bestConfidence,
-            duracionValidacion: durMs,
+            puntuacionConfianza: scoreClaimed, // Convertir distancia a score
+            duracionValidacion: 0,
           );
 
           await localDb.insertValidation(validation);
 
           // Encolar para sincronización
           await localDb
-              .insertToSyncQueue(idUsuario, 'validacion_biometrica', 'insert', {
+              .insertToSyncQueue(userId, 'validacion_biometrica', 'insert', {
                 'tipo_biometria': 'oreja',
                 'resultado': validation.resultado,
                 'puntuacion_confianza': validation.puntuacionConfianza,
                 'timestamp': validation.timestamp.toIso8601String(),
               });
 
-          if (!success)
+          if (!autenticado || !coincide) {
             throw Exception('Autenticación fallida: oreja no coincide');
+          }
         } else {
           // Voz - Validación local
           if (_recordedAudio == null) {
@@ -862,15 +939,30 @@ class _LoginScreenState extends State<LoginScreen> {
           );
 
           final nativeService = NativeVoiceMobileService();
-          final initialized = await nativeService.initialize();
 
-          if (!initialized) {
-            throw Exception(
-              'Error inicializando libvoz_mobile.so. Verifica que los modelos SVM estén copiados.',
+          try {
+            final initialized = await nativeService.initialize().timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => false,
             );
-          }
 
-          // 🔍 VERIFICAR SI EL USUARIO EXISTE EN LA BIBLIOTECA
+            if (!initialized) {
+              throw Exception(
+                'Error inicializando libvoz_mobile.so. Verifica que los modelos SVM estén copiados.',
+              );
+            }
+            print('[Login] ✅ Servicio de voz inicializado correctamente');
+
+            // ⚠️ NO hacer cleanup() + re-init porque eso BORRA los modelos SVM
+            // Los modelos ya están cargados en memoria y permanecen hasta que se cierre la app
+            print('[Login] ℹ️ Usando modelos SVM ya cargados en memoria');
+          } catch (e) {
+            print('[Login] ❌ Error inicializando servicio de voz: $e');
+            throw Exception(
+              'No se pudo inicializar el sistema de voz local. '
+              'Por favor intenta conectarte a Internet.',
+            );
+          } // 🔍 VERIFICAR SI EL USUARIO EXISTE EN LA BIBLIOTECA
           final identificador = _identifierController.text.trim();
           final userExists = nativeService.usuarioExiste(identificador);
 
@@ -934,19 +1026,27 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           }
 
-          // �🔍 VERIFICAR SI HAY ERROR DE MODELO NO CARGADO
+          // 🔍 VERIFICAR SI HAY ERROR DE MODELO NO CARGADO
           if (resultado['success'] == false) {
             final error = resultado['error'] ?? 'Error desconocido';
             if (error.toString().contains('Modelo no cargado') ||
                 error.toString().contains('No se pudo cargar el modelo')) {
               print(
-                '[Login] ⚠️ El usuario existe pero no tiene modelo SVM entrenado',
+                '[Login] ⚠️ El usuario existe en SQLite pero no tiene modelo SVM entrenado',
               );
+              print('[Login] 🔍 Posibles causas:');
+              print('[Login]    1. Los archivos class_*.bin no existen');
+              print(
+                '[Login]    2. El entrenamiento SVM falló durante el registro',
+              );
+              print('[Login]    3. Los modelos fueron borrados por cleanup()');
+
               throw Exception(
-                'Modelo de voz no entrenado. Por favor:\n'
-                '1. Elimina tu cuenta actual\n'
-                '2. Regístrate nuevamente con 6 audios de voz\n'
-                '3. Asegúrate de completar TODO el proceso de registro',
+                'Modelo de voz no encontrado. Esto puede ocurrir porque:\n\n'
+                '• Los archivos de entrenamiento (class_*.bin) no existen\n'
+                '• El registro no se completó correctamente\n\n'
+                'Solución: Vuelve a registrarte completando los 6 audios de voz.\n'
+                'Si el problema persiste, contacta al administrador.',
               );
             } else {
               throw Exception('Error en autenticación: $error');
@@ -964,59 +1064,56 @@ class _LoginScreenState extends State<LoginScreen> {
             '[Login] 🎯 Usuario esperado en SVM: ID $expectedUserId ($identificador)',
           );
 
-          // 🔍 VERIFICAR QUE predicted_class COINCIDA CON EL USUARIO
-          final predictedClass = resultado['predicted_class'];
-          final authenticated = resultado['authenticated'] as bool? ?? false;
+          // 🏆 NUEVA LÓGICA: Obtener el usuario con el SCORE MÁS ALTO
+          int? highestScoreUserId;
+          double highestScore = double.negativeInfinity;
 
-          print('[Login] 🤖 Clase predicha por SVM: $predictedClass');
-          print('[Login] 🔐 Autenticado según librería: $authenticated');
+          if (resultado['all_scores'] != null) {
+            final allScores = resultado['all_scores'] as Map<dynamic, dynamic>;
 
-          // ✅ VALIDACIÓN ESTRICTA:
-          // 1. El usuario predicho debe coincidir con el esperado
-          // 2. La librería debe indicar autenticación exitosa
-          final bool isCorrectUser = predictedClass == expectedUserId;
-          final bool success = authenticated && isCorrectUser;
+            print(
+              '[Login] 📊 Analizando scores de ${allScores.length} usuarios...',
+            );
+
+            // Encontrar el usuario con el score más alto
+            allScores.forEach((userId, score) {
+              final scoreValue = (score as num).toDouble();
+              if (scoreValue > highestScore) {
+                highestScore = scoreValue;
+                // Normalizar el userId a int (puede venir como String)
+                highestScoreUserId = userId is int
+                    ? userId
+                    : int.tryParse(userId.toString());
+              }
+            });
+
+            print(
+              '[Login] 🏆 Usuario con mayor score: ID $highestScoreUserId (${(highestScore * 100).toStringAsFixed(2)}%)',
+            );
+            print('[Login] 🎯 Usuario esperado: ID $expectedUserId');
+          }
+
+          // ✅ VALIDACIÓN ESTRICTA: El usuario con el score MÁS ALTO debe ser el esperado
+          final bool isCorrectUser = highestScoreUserId == expectedUserId;
+          final bool success = isCorrectUser && highestScore > 0;
 
           if (!isCorrectUser) {
             print(
-              '[Login] ❌ RECHAZO: Voz pertenece al usuario ID $predictedClass, no al ID $expectedUserId',
+              '[Login] ❌ RECHAZO: La voz pertenece al usuario ID $highestScoreUserId (score: ${(highestScore * 100).toStringAsFixed(2)}%), no al ID $expectedUserId',
             );
-          }
-
-          // 🔍 EXTRAER SCORE NORMALIZADO de all_scores
-          double normalizedScore = 0.0;
-          if (resultado['all_scores'] != null) {
-            final allScores = resultado['all_scores'] as Map<dynamic, dynamic>;
-            if (allScores.isNotEmpty) {
-              // Obtener el score del usuario ESPERADO (no el predicho)
-              if (allScores.containsKey(expectedUserId)) {
-                normalizedScore = (allScores[expectedUserId] as num).toDouble();
-                print(
-                  '[Login] 🏆 Score del usuario correcto ($expectedUserId): ${(normalizedScore * 100).toStringAsFixed(2)}%',
-                );
-              } else {
-                print(
-                  '[Login] ⚠️ No hay score para el usuario esperado ($expectedUserId)',
-                );
-              }
-
-              // Mostrar score del usuario predicho (para debug)
-              if (predictedClass != null &&
-                  allScores.containsKey(predictedClass)) {
-                final predictedScore = (allScores[predictedClass] as num)
-                    .toDouble();
-                print(
-                  '[Login] 📊 Score del usuario predicho ($predictedClass): ${(predictedScore * 100).toStringAsFixed(2)}%',
-                );
-              }
-            }
+          } else {
+            print(
+              '[Login] ✅ MATCH: El usuario con el score más alto ($highestScoreUserId) coincide con el esperado ($expectedUserId)',
+            );
           }
 
           print(
             '[Login] ${success ? "✅ AUTENTICACIÓN VOZ EXITOSA (SVM)" : "❌ AUTENTICACIÓN VOZ FALLIDA (SVM)"}',
           );
-          print('[Login] � Usuario correcto: ${isCorrectUser ? "SÍ" : "NO"}');
-          print('[Login] 🔐 Autenticado: ${authenticated ? "SÍ" : "NO"}');
+          print('[Login] 👤 Usuario correcto: ${isCorrectUser ? "SÍ" : "NO"}');
+          print(
+            '[Login] � Score final: ${(highestScore * 100).toStringAsFixed(2)}%',
+          );
 
           final validation = BiometricValidation(
             id: 0,
@@ -1025,7 +1122,7 @@ class _LoginScreenState extends State<LoginScreen> {
             resultado: success ? 'exito' : 'fallo',
             modoValidacion: 'offline',
             timestamp: DateTime.now(),
-            puntuacionConfianza: normalizedScore,
+            puntuacionConfianza: highestScore,
             duracionValidacion: 0,
           );
 
@@ -1049,24 +1146,84 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      // ✅ Autenticación exitosa - reiniciar contador de intentos
+      // ✅ Autenticación biométrica exitosa - reiniciar contador de intentos
       _loginAttempts = 0;
       _lockoutUntil = null;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _selectedBiometricType == 1
-                ? '¡Autenticación con oreja exitosa!'
-                : '¡Autenticación con voz exitosa!',
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
+      // 🔐 NUEVO: Sistema de autenticación dual (si está habilitado)
+      if (settings.requireBothBiometricsInLogin == true) {
+        // Marcar la biometría actual como completada
+        if (_selectedBiometricType == 1) {
+          _earAuthCompleted = true;
+          print('[Login] ✅ Autenticación de OREJA completada (1/2)');
+        } else {
+          _voiceAuthCompleted = true;
+          print('[Login] ✅ Autenticación de VOZ completada (1/2)');
+        }
 
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+        // Verificar si AMBAS biometrías están completadas
+        if (_earAuthCompleted && _voiceAuthCompleted) {
+          print('[Login] 🎉 AMBAS biometrías validadas - Acceso permitido');
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🎉 ¡Autenticación completa! (Oreja ✅ + Voz ✅)'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        } else {
+          // Aún falta una biometría
+          final String pendiente = _earAuthCompleted ? 'VOZ' : 'OREJA';
+          print('[Login] ⏳ Falta autenticación de $pendiente');
+
+          setState(() {
+            _isLoading = false;
+            _errorMessage = null;
+            // Cambiar automáticamente al otro tipo de biometría
+            _selectedBiometricType = _earAuthCompleted ? 2 : 1;
+
+            // Limpiar captura previa
+            _capturedPhoto = null;
+            _recordedAudio = null;
+          });
+
+          // Cargar frase si cambiamos a voz
+          if (_selectedBiometricType == 2) {
+            _loadRandomPhrase();
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ ${_earAuthCompleted ? "Oreja" : "Voz"} validada. Ahora autentica con $pendiente',
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        // Modo normal: UNA sola biometría es suficiente
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _selectedBiometricType == 1
+                  ? '¡Autenticación con oreja exitosa!'
+                  : '¡Autenticación con voz exitosa!',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
     } catch (error) {
       if (!mounted) return;
 
@@ -1283,6 +1440,63 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ] else ...[
+                        // 🔐 NUEVO: Indicador de autenticación dual (si está habilitado)
+                        if (biometricRequired &&
+                            settings?.requireBothBiometricsInLogin == true)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: Colors.deepPurple.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.deepPurple,
+                                width: 2,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.security,
+                                      color: Colors.deepPurple,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '🔐 Autenticación Dual Obligatoria',
+                                        style: TextStyle(
+                                          color: Colors.deepPurple.shade900,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    _buildBiometricStatusChip(
+                                      label: 'Oreja',
+                                      icon: Icons.hearing,
+                                      completed: _earAuthCompleted,
+                                    ),
+                                    Icon(Icons.add, color: Colors.deepPurple),
+                                    _buildBiometricStatusChip(
+                                      label: 'Voz',
+                                      icon: Icons.mic,
+                                      completed: _voiceAuthCompleted,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
                         // Seleccionar tipo biométrico
                         const Text(
                           'Selecciona método de autenticación:',
@@ -1361,18 +1575,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 12),
 
-                          // 🎤 Mostrar frase que debe decir el usuario
+                          // 🎤 Mostrar LAS 2 FRASES que debe decir el usuario
                           if (_isLoadingPhrase)
                             const Center(
                               child: Column(
                                 children: [
                                   CircularProgressIndicator(),
                                   SizedBox(height: 8),
-                                  Text('Cargando frase...'),
+                                  Text('Cargando frases...'),
                                 ],
                               ),
                             )
-                          else if (_currentPhrase != null)
+                          else if (_voicePhrases.length == 2)
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
@@ -1394,7 +1608,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       SizedBox(width: 8),
                                       Text(
-                                        'Di la siguiente frase:',
+                                        'Di las siguientes 2 frases:',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
@@ -1404,15 +1618,58 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ],
                                   ),
                                   const SizedBox(height: 12),
-                                  Text(
-                                    '"$_currentPhrase"',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      fontStyle: FontStyle.italic,
-                                      color: Colors.black87,
-                                    ),
+                                  // Frase 1
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        '1. ',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          '"${_voicePhrases[0]}"',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            fontStyle: FontStyle.italic,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  // Frase 2
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        '2. ',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          '"${_voicePhrases[1]}"',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            fontStyle: FontStyle.italic,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -1570,6 +1827,49 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
         );
       },
+    );
+  }
+
+  /// 🔐 Widget para mostrar el estado de cada biometría en autenticación dual
+  Widget _buildBiometricStatusChip({
+    required String label,
+    required IconData icon,
+    required bool completed,
+  }) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: completed ? Colors.green.shade100 : Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: completed ? Colors.green : Colors.grey.shade400,
+          width: 2,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: completed ? Colors.green.shade700 : Colors.grey.shade600,
+          ),
+          SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: completed ? Colors.green.shade900 : Colors.grey.shade700,
+              fontWeight: completed ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          SizedBox(width: 6),
+          Icon(
+            completed ? Icons.check_circle : Icons.circle_outlined,
+            size: 18,
+            color: completed ? Colors.green.shade700 : Colors.grey.shade400,
+          ),
+        ],
+      ),
     );
   }
 }

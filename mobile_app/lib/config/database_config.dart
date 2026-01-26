@@ -4,7 +4,7 @@ import 'package:path/path.dart';
 class DatabaseConfig {
   static const String dbName = 'biometrics_local.db';
   static const int dbVersion =
-      12; // v12: Agregar columna embedding a credenciales_biometricas para comparación offline
+      13; // v13: Inicializar AUTOINCREMENT en 10001 para evitar conflicto con templates_k1.csv
 
   static final DatabaseConfig _instance = DatabaseConfig._internal();
 
@@ -51,7 +51,20 @@ class DatabaseConfig {
       )
     ''');
 
-    // 📌 Tabla para credenciales biométricas (CON TEMPLATE BLOB)
+    // � INICIALIZAR AUTOINCREMENT EN 10001 para evitar conflicto con templates_k1.csv (IDs 1-50)
+    print('🔧 Inicializando contador de IDs de usuario en 10001...');
+    await db.execute('''
+      INSERT INTO usuarios (id_usuario, nombres, apellidos, identificador_unico, estado)
+      VALUES (10000, '_DUMMY_', '_DUMMY_', '_INIT_AUTOINCREMENT_', 'inactivo')
+    ''');
+    await db.execute('''
+      DELETE FROM usuarios WHERE id_usuario = 10000
+    ''');
+    print(
+      '✅ Próximos usuarios registrados tendrán ID >= 10001 (sin conflicto con templates pre-cargados)',
+    );
+
+    // �📌 Tabla para credenciales biométricas (CON TEMPLATE BLOB)
     await db.execute('''
       CREATE TABLE credenciales_biometricas (
         id_credencial INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -535,6 +548,47 @@ class DatabaseConfig {
         print(
           '⚠️ Error en migración v12, pero se puede ignorar si ya existe: $e',
         );
+      }
+    }
+
+    // v13: Inicializar AUTOINCREMENT en 10001 para evitar conflicto con templates_k1.csv
+    if (oldVersion < 13) {
+      try {
+        // Verificar el ID máximo actual en la tabla usuarios
+        final maxIdResult = await db.rawQuery(
+          'SELECT MAX(id_usuario) as max_id FROM usuarios',
+        );
+        final maxId = Sqflite.firstIntValue(maxIdResult) ?? 0;
+
+        if (maxId < 10000) {
+          print(
+            '🔧 Inicializando contador de IDs en 10001 para evitar conflicto con templates pre-cargados...',
+          );
+
+          // Insertar registro dummy con ID 10000 y eliminarlo para avanzar el contador
+          await db.execute('''
+            INSERT INTO usuarios (id_usuario, nombres, apellidos, identificador_unico, estado)
+            VALUES (10000, '_DUMMY_', '_DUMMY_', '_INIT_AUTOINCREMENT_V13_', 'inactivo')
+          ''');
+          await db.execute('''
+            DELETE FROM usuarios WHERE id_usuario = 10000
+          ''');
+
+          print(
+            '✅ Próximos usuarios tendrán ID >= 10001 (sin conflicto con templates_k1.csv que tiene IDs 1-50)',
+          );
+        } else {
+          print(
+            'ℹ️ Ya existen usuarios con ID >= 10000, no se requiere ajuste de contador',
+          );
+        }
+
+        print(
+          '✅ Migración v13: Contador de AUTOINCREMENT ajustado correctamente',
+        );
+      } catch (e) {
+        print('⚠️ Error en migración v13: $e');
+        print('⚠️ Si ya hay usuarios registrados, puede ignorarse este error');
       }
     }
   }

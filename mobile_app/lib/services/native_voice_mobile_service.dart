@@ -71,7 +71,8 @@ typedef _VozMobileInsertarFrasesNative =
 typedef _VozMobileInsertarFrasesDart =
     int Function(ffi.Pointer<ffi.Char> frasesJson);
 
-// int voz_mobile_registrar_biometria(const char* identificador, const char* audio_path, int id_frase, char* resultado_json, size_t buffer_size)
+// int voz_mobile_registrar_biometria_incremental(const char* identificador, const char* audio_path, int id_frase, char* resultado_json, size_t buffer_size)
+// Usa entrenamiento incremental (más rápido, evita ANR) - solo entrena el clasificador del nuevo usuario
 typedef _VozMobileRegistrarBiometriaNative =
     ffi.Int32 Function(
       ffi.Pointer<ffi.Char> identificador,
@@ -85,6 +86,25 @@ typedef _VozMobileRegistrarBiometriaDart =
       ffi.Pointer<ffi.Char> identificador,
       ffi.Pointer<ffi.Char> audioPath,
       int idFrase,
+      ffi.Pointer<ffi.Char> resultadoJson,
+      int bufferSize,
+    );
+
+// int voz_mobile_registrar_biometria_batch(const char* identificador, const char** audio_paths, int num_audios, char* resultado_json, size_t buffer_size)
+// 🚀 BATCH OPTIMIZADO: Procesa TODOS los audios y entrena UNA SOLA VEZ (O(n) en vez de O(n²))
+typedef _VozMobileRegistrarBiometriaBatchNative =
+    ffi.Int32 Function(
+      ffi.Pointer<ffi.Char> identificador,
+      ffi.Pointer<ffi.Pointer<ffi.Char>> audioPaths,
+      ffi.Int32 numAudios,
+      ffi.Pointer<ffi.Char> resultadoJson,
+      ffi.IntPtr bufferSize,
+    );
+typedef _VozMobileRegistrarBiometriaBatchDart =
+    int Function(
+      ffi.Pointer<ffi.Char> identificador,
+      ffi.Pointer<ffi.Pointer<ffi.Char>> audioPaths,
+      int numAudios,
       ffi.Pointer<ffi.Char> resultadoJson,
       int bufferSize,
     );
@@ -196,6 +216,7 @@ class NativeVoiceMobileService {
   static _VozMobileObtenerFrasePorIdDart? _vozMobileObtenerFrasePorId;
   static _VozMobileInsertarFrasesDart? _vozMobileInsertarFrases;
   static _VozMobileRegistrarBiometriaDart? _vozMobileRegistrar;
+  static _VozMobileRegistrarBiometriaBatchDart? _vozMobileRegistrarBatch;
   static _VozMobileAutenticarDart? _vozMobileAutenticar;
   static _VozMobileSyncPushDart? _vozMobileSyncPush;
   static _VozMobileSyncPullDart? _vozMobileSyncPull;
@@ -348,9 +369,15 @@ class NativeVoiceMobileService {
 
     _vozMobileRegistrar = _lib!
         .lookup<ffi.NativeFunction<_VozMobileRegistrarBiometriaNative>>(
-          'voz_mobile_registrar_biometria',
+          'voz_mobile_registrar_biometria_incremental',
         )
         .asFunction<_VozMobileRegistrarBiometriaDart>();
+
+    _vozMobileRegistrarBatch = _lib!
+        .lookup<ffi.NativeFunction<_VozMobileRegistrarBiometriaBatchNative>>(
+          'voz_mobile_registrar_biometria_batch',
+        )
+        .asFunction<_VozMobileRegistrarBiometriaBatchDart>();
 
     _vozMobileAutenticar = _lib!
         .lookup<ffi.NativeFunction<_VozMobileAutenticarNative>>(
@@ -427,7 +454,119 @@ class NativeVoiceMobileService {
       '${appDir.path}/models/v1/metadata.json',
     );
 
+    // 🔥 Copiar TODOS los modelos SVM pre-cargados (class_*.bin)
+    await _copySVMModels();
+
     print('[NativeVoiceMobile] ✅ Assets copiados a almacenamiento local');
+  }
+
+  /// 🔥 Copiar modelos SVM (class_*.bin) desde assets
+  /// ⚠️ SOLO se copian si NO existen - para preservar modelos nuevos creados localmente
+  Future<void> _copySVMModels() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final modelsDir = '${appDir.path}/models/v1';
+
+    // Crear directorio si no existe
+    await Directory(modelsDir).create(recursive: true);
+
+    // ✅ Verificar si ya se copiaron los modelos base (primera ejecución)
+    final flagFile = File('$modelsDir/.models_copiados');
+    if (await flagFile.exists()) {
+      print(
+        '[NativeVoiceMobile] ⏭️ Modelos SVM ya copiados previamente (preservando modelos locales)',
+      );
+      return;
+    }
+
+    print(
+      '[NativeVoiceMobile] 📦 Primera ejecución: copiando 67 modelos base...',
+    );
+
+    // Lista de 67 clasificadores pre-cargados (sin incluir IDs de usuarios nuevos)
+    final classIds = [
+      '10013',
+      '101',
+      '10191',
+      '10206',
+      '10246',
+      '10256',
+      '10827',
+      '10982',
+      '11040',
+      '11048',
+      '11064',
+      '11135',
+      '11410',
+      '11553',
+      '11694',
+      '11797',
+      '12091',
+      '12341',
+      '12367',
+      '12428',
+      '12692',
+      '12921',
+      '13664',
+      '13690',
+      '13697',
+      '1447',
+      '1474',
+      '1512',
+      '1853',
+      '2285',
+      '2305',
+      '2363',
+      '2675',
+      '3290',
+      '383',
+      '3946',
+      '4064',
+      '407',
+      '441',
+      '452',
+      '4817',
+      '5047',
+      '5051',
+      '5511',
+      '5863',
+      '5922',
+      '6156',
+      '6201',
+      '6447',
+      '6453',
+      '6615',
+      '675',
+      '6768',
+      '677',
+      '7393',
+      '7433',
+      '7560',
+      '8060',
+      '8304',
+      '8313',
+      '8677',
+      '8688',
+      '8881',
+      '8882',
+      '8886',
+      '9063',
+      '9972',
+    ];
+
+    for (final classId in classIds) {
+      await _copyAsset(
+        'assets/models/v1/class_$classId.bin',
+        '$modelsDir/class_$classId.bin',
+      );
+    }
+
+    print(
+      '[NativeVoiceMobile] ✅ Copiados ${classIds.length} modelos SVM pre-cargados',
+    );
+
+    // Marcar que los modelos base ya fueron copiados
+    await flagFile.writeAsString('1');
+    print('[NativeVoiceMobile] 🏁 Modelos base marcados como copiados');
   }
 
   /// Copiar un asset individual
@@ -448,15 +587,6 @@ class NativeVoiceMobileService {
       );
     } catch (e) {
       print('[NativeVoiceMobile] ⚠️ Error copiando $assetPath: $e');
-    }
-  }
-
-  /// Liberar recursos
-  void cleanup() {
-    if (_initialized && _vozMobileCleanup != null) {
-      _vozMobileCleanup!();
-      _initialized = false;
-      print('[NativeVoiceMobile] 🧹 Recursos liberados');
     }
   }
 
@@ -652,6 +782,72 @@ class NativeVoiceMobileService {
     } finally {
       malloc.free(identPtr);
       malloc.free(audioPtr);
+      malloc.free(resultBuffer);
+    }
+  }
+
+  /// 🚀 Registrar biometría de voz en BATCH (ULTRA OPTIMIZADO)
+  /// Procesa TODOS los audios y entrena UNA SOLA VEZ al final.
+  /// Evita re-entrenar el modelo por cada audio (O(n²) -> O(n)).
+  Future<Map<String, dynamic>> registerBiometricBatch({
+    required String identificador,
+    required List<String> audioPaths,
+  }) async {
+    if (_vozMobileRegistrarBatch == null) {
+      return {
+        'success': false,
+        'error': 'Función batch no disponible en la librería',
+      };
+    }
+
+    print('[NativeVoiceMobile] 🚀 Registrando biometría BATCH...');
+    print('[NativeVoiceMobile]    Usuario: $identificador');
+    print('[NativeVoiceMobile]    Audios: ${audioPaths.length}');
+
+    final identPtr = identificador.toNativeUtf8();
+    final resultBuffer = malloc<ffi.Char>(8192);
+
+    // Crear array de punteros a strings (const char**)
+    final audioPathsPtr = malloc<ffi.Pointer<ffi.Char>>(audioPaths.length);
+    final audioPathPtrs = <ffi.Pointer<ffi.Char>>[];
+
+    try {
+      // Convertir cada path a char* y guardarlo
+      for (int i = 0; i < audioPaths.length; i++) {
+        final pathPtr = audioPaths[i].toNativeUtf8();
+        audioPathsPtr[i] = pathPtr.cast();
+        audioPathPtrs.add(pathPtr.cast());
+      }
+
+      print(
+        '[NativeVoiceMobile] 📤 Llamando a C++ batch con ${audioPaths.length} audios...',
+      );
+      final returnCode = _vozMobileRegistrarBatch!(
+        identPtr.cast(),
+        audioPathsPtr,
+        audioPaths.length,
+        resultBuffer.cast(),
+        8192,
+      );
+
+      if (returnCode == 0) {
+        final jsonStr = resultBuffer.cast<Utf8>().toDartString();
+        final resultado = jsonDecode(jsonStr);
+
+        print('[NativeVoiceMobile] ✅✅✅ Registro BATCH exitoso: $resultado');
+        return resultado;
+      } else {
+        final error = getUltimoError();
+        print('[NativeVoiceMobile] ❌ Error en registro batch: $error');
+        return {'success': false, 'error': error};
+      }
+    } finally {
+      // Liberar todos los punteros
+      malloc.free(identPtr);
+      for (final ptr in audioPathPtrs) {
+        malloc.free(ptr);
+      }
+      malloc.free(audioPathsPtr);
       malloc.free(resultBuffer);
     }
   }
