@@ -59,6 +59,28 @@ class NativeEarMobileService {
   // int oreja_mobile_reload_templates()
   int Function()? _orejaMobileReloadTemplates;
 
+  // int oreja_mobile_sync_push(const char* server_url, char* resultado_json, size_t buffer_size)
+  int Function(ffi.Pointer<ffi.Char>, ffi.Pointer<ffi.Char>, int)?
+  _orejaMobileSyncPush;
+
+  // int oreja_mobile_sync_pull(const char* server_url, const char* desde, char* resultado_json, size_t buffer_size)
+  int Function(
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+    int,
+  )?
+  _orejaMobileSyncPull;
+
+  // int oreja_mobile_sync_modelo(const char* server_url, const char* archivo, char* resultado_json, size_t buffer_size)
+  int Function(
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+    int,
+  )?
+  _orejaMobileSyncModelo;
+
   // ============================================================================
   // INICIALIZACION
   // ============================================================================
@@ -200,6 +222,44 @@ class NativeEarMobileService {
         .lookup<ffi.NativeFunction<ffi.Int32 Function()>>(
           'oreja_mobile_reload_templates',
         )
+        .asFunction();
+
+    _orejaMobileSyncPush = _lib!
+        .lookup<
+          ffi.NativeFunction<
+            ffi.Int32 Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+            )
+          >
+        >('oreja_mobile_sync_push')
+        .asFunction();
+
+    _orejaMobileSyncPull = _lib!
+        .lookup<
+          ffi.NativeFunction<
+            ffi.Int32 Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+            )
+          >
+        >('oreja_mobile_sync_pull')
+        .asFunction();
+
+    _orejaMobileSyncModelo = _lib!
+        .lookup<
+          ffi.NativeFunction<
+            ffi.Int32 Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+            )
+          >
+        >('oreja_mobile_sync_modelo')
         .asFunction();
   }
 
@@ -442,6 +502,127 @@ class NativeEarMobileService {
       }
     } finally {
       malloc.free(buffer);
+    }
+  }
+
+  // ============================================================================
+  // SINCRONIZACION
+  // ============================================================================
+
+  /// Push: enviar vectores pendientes al servidor
+  Future<Map<String, dynamic>> syncPush(String serverUrl) async {
+    if (_orejaMobileSyncPush == null) {
+      return {'ok': false, 'error': 'Función no disponible'};
+    }
+
+    print('[NativeEarMobile] 🔄 Sync Push → $serverUrl');
+
+    final urlPtr = serverUrl.toNativeUtf8();
+    final resultBuffer = malloc<ffi.Char>(8192);
+
+    try {
+      final returnCode = _orejaMobileSyncPush!(
+        urlPtr.cast(),
+        resultBuffer.cast(),
+        8192,
+      );
+
+      if (returnCode == 0) {
+        final jsonStr = resultBuffer.cast<Utf8>().toDartString();
+        final resultado = jsonDecode(jsonStr);
+
+        print('[NativeEarMobile] ✅ Sync Push OK: $resultado');
+        return resultado;
+      } else {
+        final error = getUltimoError();
+        print('[NativeEarMobile] ❌ Sync Push Error: $error');
+        return {'ok': false, 'error': error};
+      }
+    } finally {
+      malloc.free(urlPtr);
+      malloc.free(resultBuffer);
+    }
+  }
+
+  /// Pull: descargar cambios del servidor
+  Future<Map<String, dynamic>> syncPull(
+    String serverUrl, {
+    String? desde,
+  }) async {
+    if (_orejaMobileSyncPull == null) {
+      return {'ok': false, 'error': 'Función no disponible'};
+    }
+
+    print('[NativeEarMobile] 🔄 Sync Pull ← $serverUrl');
+
+    final urlPtr = serverUrl.toNativeUtf8();
+    final desdePtr = (desde ?? '').toNativeUtf8();
+    final resultBuffer = malloc<ffi.Char>(16384);
+
+    try {
+      final returnCode = _orejaMobileSyncPull!(
+        urlPtr.cast(),
+        desdePtr.cast(),
+        resultBuffer.cast(),
+        16384,
+      );
+
+      if (returnCode == 0) {
+        final jsonStr = resultBuffer.cast<Utf8>().toDartString();
+        final resultado = jsonDecode(jsonStr);
+
+        print('[NativeEarMobile] ✅ Sync Pull OK: $resultado');
+        return resultado;
+      } else {
+        final error = getUltimoError();
+        print('[NativeEarMobile] ❌ Sync Pull Error: $error');
+        return {'ok': false, 'error': error};
+      }
+    } finally {
+      malloc.free(urlPtr);
+      malloc.free(desdePtr);
+      malloc.free(resultBuffer);
+    }
+  }
+
+  /// Pull modelo: descargar archivo del servidor (templates/modelo/umbral)
+  Future<Map<String, dynamic>> syncModelo(
+    String serverUrl,
+    String archivo,
+  ) async {
+    if (_orejaMobileSyncModelo == null) {
+      return {'ok': false, 'error': 'Función no disponible'};
+    }
+
+    print('[NativeEarMobile] 🔄 Sync Modelo ← $serverUrl ($archivo)');
+
+    final urlPtr = serverUrl.toNativeUtf8();
+    final archivoPtr = archivo.toNativeUtf8();
+    final resultBuffer = malloc<ffi.Char>(4096);
+
+    try {
+      final returnCode = _orejaMobileSyncModelo!(
+        urlPtr.cast(),
+        archivoPtr.cast(),
+        resultBuffer.cast(),
+        4096,
+      );
+
+      if (returnCode == 0) {
+        final jsonStr = resultBuffer.cast<Utf8>().toDartString();
+        final resultado = jsonDecode(jsonStr);
+
+        print('[NativeEarMobile] ✅ Modelo sincronizado: $resultado');
+        return resultado;
+      } else {
+        final error = getUltimoError();
+        print('[NativeEarMobile] ❌ Error sincronizando modelo: $error');
+        return {'ok': false, 'error': error};
+      }
+    } finally {
+      malloc.free(urlPtr);
+      malloc.free(archivoPtr);
+      malloc.free(resultBuffer);
     }
   }
 }

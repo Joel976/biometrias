@@ -6,6 +6,8 @@ import '../services/local_database_service.dart';
 import '../services/offline_sync_service.dart';
 import '../services/admin_settings_service.dart';
 import '../services/biometric_backend_service.dart';
+import '../services/native_voice_mobile_service.dart';
+import '../services/native_ear_mobile_service.dart';
 import '../models/biometric_models.dart';
 import 'package:dio/dio.dart';
 
@@ -822,6 +824,170 @@ class SyncManager {
 
   void _emitStatus(SyncStatus status) {
     _syncStatusStream.add(status);
+  }
+
+  // ============================================================================
+  // SINCRONIZACION NATIVA (usando liboreja_mobile.so y libvoz_mobile.so)
+  // ============================================================================
+
+  /// Sincronizar vectores de VOZ con el servidor (Push + Pull)
+  Future<Map<String, dynamic>> syncNativeVoz(String serverUrl) async {
+    print('[SyncManager] 🎤 Iniciando sincronización NATIVA de VOZ...');
+
+    try {
+      final nativeVoz = NativeVoiceMobileService();
+
+      // 1. Push: Enviar vectores pendientes al servidor
+      print('[SyncManager] 📤 VOZ Push...');
+      final pushResult = await nativeVoz.syncPush(serverUrl);
+
+      if (pushResult['ok'] != true) {
+        throw Exception('Push fallido: ${pushResult['error']}');
+      }
+
+      print(
+        '[SyncManager] ✅ VOZ Push exitoso: ${pushResult['enviados'] ?? 0} vectores enviados',
+      );
+
+      // 2. Pull: Descargar cambios del servidor
+      print('[SyncManager] 📥 VOZ Pull...');
+      final pullResult = await nativeVoz.syncPull(serverUrl);
+
+      if (pullResult['ok'] != true) {
+        throw Exception('Pull fallido: ${pullResult['error']}');
+      }
+
+      print(
+        '[SyncManager] ✅ VOZ Pull exitoso: ${pullResult['insertados'] ?? 0} frases descargadas',
+      );
+
+      return {'success': true, 'push': pushResult, 'pull': pullResult};
+    } catch (e) {
+      print('[SyncManager] ❌ Error sincronizando VOZ: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Sincronizar vectores de OREJA con el servidor (Push + Pull)
+  Future<Map<String, dynamic>> syncNativeOreja(String serverUrl) async {
+    print('[SyncManager] 👂 Iniciando sincronización NATIVA de OREJA...');
+
+    try {
+      final nativeOreja = NativeEarMobileService();
+
+      // 1. Push: Enviar vectores pendientes al servidor
+      print('[SyncManager] 📤 OREJA Push...');
+      final pushResult = await nativeOreja.syncPush(serverUrl);
+
+      if (pushResult['ok'] != true) {
+        throw Exception('Push fallido: ${pushResult['error']}');
+      }
+
+      print(
+        '[SyncManager] ✅ OREJA Push exitoso: ${pushResult['enviados'] ?? 0} vectores enviados',
+      );
+
+      // 2. Pull: Descargar cambios del servidor
+      print('[SyncManager] 📥 OREJA Pull...');
+      final pullResult = await nativeOreja.syncPull(serverUrl);
+
+      if (pullResult['ok'] != true) {
+        throw Exception('Pull fallido: ${pullResult['error']}');
+      }
+
+      print(
+        '[SyncManager] ✅ OREJA Pull exitoso: ${pullResult['insertados'] ?? 0} credenciales descargadas',
+      );
+
+      return {'success': true, 'push': pushResult, 'pull': pullResult};
+    } catch (e) {
+      print('[SyncManager] ❌ Error sincronizando OREJA: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Descargar modelo re-entrenado de VOZ desde el servidor
+  Future<Map<String, dynamic>> syncModeloVoz(
+    String serverUrl,
+    String identificador,
+  ) async {
+    print('[SyncManager] 🎤 Descargando modelo VOZ para $identificador...');
+
+    try {
+      final nativeVoz = NativeVoiceMobileService();
+      final result = await nativeVoz.syncModelo(serverUrl, identificador);
+
+      if (result['ok'] == true) {
+        print(
+          '[SyncManager] ✅ Modelo VOZ descargado: ${result['archivo_local']}',
+        );
+      } else {
+        print('[SyncManager] ❌ Error descargando modelo: ${result['error']}');
+      }
+
+      return result;
+    } catch (e) {
+      print('[SyncManager] ❌ Excepción descargando modelo VOZ: $e');
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Descargar archivo de OREJA desde el servidor (templates/modelo/umbral)
+  Future<Map<String, dynamic>> syncArchivoOreja(
+    String serverUrl,
+    String archivo,
+  ) async {
+    print('[SyncManager] 👂 Descargando archivo OREJA: $archivo...');
+
+    try {
+      final nativeOreja = NativeEarMobileService();
+      final result = await nativeOreja.syncModelo(serverUrl, archivo);
+
+      if (result['ok'] == true) {
+        print(
+          '[SyncManager] ✅ Archivo OREJA descargado: ${result['archivo_local']}',
+        );
+
+        // Si descargamos templates, recargarlos automáticamente
+        if (archivo == 'templates_k1.csv') {
+          print('[SyncManager] 🔄 Recargando templates en memoria...');
+          await nativeOreja.reloadTemplates();
+        }
+      } else {
+        print('[SyncManager] ❌ Error descargando archivo: ${result['error']}');
+      }
+
+      return result;
+    } catch (e) {
+      print('[SyncManager] ❌ Excepción descargando archivo OREJA: $e');
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// Sincronización completa de AMBAS biometrías (VOZ + OREJA)
+  Future<Map<String, dynamic>> syncNativeComplete(String serverUrl) async {
+    print('[SyncManager] 🔄 Iniciando sincronización COMPLETA nativa...');
+
+    final results = <String, dynamic>{};
+
+    // Sincronizar VOZ
+    results['voz'] = await syncNativeVoz(serverUrl);
+
+    // Sincronizar OREJA
+    results['oreja'] = await syncNativeOreja(serverUrl);
+
+    final vozSuccess = results['voz']['success'] == true;
+    final orejaSuccess = results['oreja']['success'] == true;
+
+    results['success'] = vozSuccess && orejaSuccess;
+
+    if (results['success']) {
+      print('[SyncManager] ✅✅ Sincronización nativa COMPLETA exitosa');
+    } else {
+      print('[SyncManager] ⚠️ Sincronización nativa completada con errores');
+    }
+
+    return results;
   }
 
   void dispose() {

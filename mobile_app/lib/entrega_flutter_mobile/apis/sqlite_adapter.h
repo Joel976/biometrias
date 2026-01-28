@@ -56,6 +56,18 @@ struct CaracteristicaHablante {
     int sincronizado;
 };
 
+struct CaracteristicaOreja {
+    int id_caracteristica;
+    int id_usuario;
+    int id_credencial;
+    std::vector<double> vector_features;
+    int dimension;
+    std::string origen;
+    std::string uuid_dispositivo;
+    std::string fecha_captura;
+    int sincronizado;
+};
+
 // ============================================================================
 // Adaptador SQLite para App Movil
 // ============================================================================
@@ -138,6 +150,16 @@ public:
     std::vector<CaracteristicaHablante> obtenerCaracteristicasPendientes();
     bool marcarCaracteristicaSincronizada(int idCaracteristica);
     std::vector<CaracteristicaHablante> obtenerCaracteristicasPorUsuario(int idUsuario);
+
+    // ========================================================================
+    // CARACTERISTICAS OREJA
+    // ========================================================================
+    int insertarCaracteristicaOrejaLocal(int idUsuario, int idCredencial, 
+                                         const std::vector<double>& features,
+                                         const std::string& uuidDispositivo = "");
+    std::vector<CaracteristicaOreja> obtenerCaracteristicasOrejaPendientes();
+    bool marcarCaracteristicaOrejaSincronizada(int idCaracteristica);
+    std::vector<CaracteristicaOreja> obtenerCaracteristicasOrejaPorUsuario(int idUsuario);
 
     // ========================================================================
     // UTILIDADES

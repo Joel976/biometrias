@@ -29,7 +29,7 @@ class BiometricBackendService {
     BaseOptions(
       baseUrl: EnvironmentConfig.vozBackendUrl,
       connectTimeout: Duration(seconds: 10),
-      receiveTimeout: Duration(seconds: 10),
+      receiveTimeout: Duration(seconds: 30),
     ),
   );
 
@@ -134,14 +134,14 @@ class BiometricBackendService {
 
   /// 2) Registrar biometría de oreja (enrolamiento)
   /// POST /oreja/registrar
-  /// Requiere: identificador (query param) + 7+ imágenes como multipart/form-data
+  /// Requiere: identificador (query param) + 5 imágenes como multipart/form-data
   Future<Map<String, dynamic>> registrarBiometriaOreja({
     required String identificador,
     required List<Uint8List> imagenes,
   }) async {
     try {
-      if (imagenes.length < 7) {
-        throw Exception('Se requieren al menos 7 imágenes para registro');
+      if (imagenes.length < 5) {
+        throw Exception('Se requieren al menos 5 imágenes para registro');
       }
 
       print(
