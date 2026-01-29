@@ -77,9 +77,13 @@ class SyncManager {
 
     // Luego configurar timer periódico
     _syncTimer = Timer.periodic(_syncInterval, (_) async {
-      print(
-        '[SyncManager] ⏰ Timer activado - ejecutando sincronización periódica...',
-      );
+      final pending = await getPendingSyncCount();
+      if (pending == 0) {
+        print('[SyncManager] ⏸️ No hay datos pendientes, omitiendo sync');
+        return;
+      }
+
+      print('[SyncManager] ⏰ Hay $pending datos pendientes, sincronizando...');
       await performSync();
     });
   }

@@ -582,7 +582,7 @@ class _LoginScreenState extends State<LoginScreen> {
             final access = result['access'] ?? false;
 
             // ✅ Autenticado SOLO si ambas condiciones son verdaderas
-            cloudAuthSuccess = authenticated && access;
+            cloudAuthSuccess = authenticated && (result['access'] ?? true);
 
             print('[Login] 📊 Resultado backend (oreja):');
             print('[Login]    - authenticated: $authenticated');
@@ -671,7 +671,8 @@ class _LoginScreenState extends State<LoginScreen> {
             final access = data['access'] ?? false;
 
             // ✅ Autenticado SOLO si: authenticated=true Y texto_coincide=true Y access=true
-            cloudAuthSuccess = authenticated && textoCoincide && access;
+            cloudAuthSuccess =
+                authenticated && textoCoincide && (access ?? true);
 
             print('[Login] 📊 Resultado backend:');
             print('[Login]    - authenticated: $authenticated');

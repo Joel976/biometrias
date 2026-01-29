@@ -288,9 +288,9 @@ class _RegisterScreenState extends State<RegisterScreen>
       // Intentar cargar frases desde la base de datos local (sincronizadas)
       final phrasesFromDb = await _localDb.getVoicePhrases();
 
-      if (phrasesFromDb.isNotEmpty && phrasesFromDb.length >= 12) {
+      if (phrasesFromDb.isNotEmpty && phrasesFromDb.length >= 6) {
         setState(() {
-          _voicePhrases = phrasesFromDb.take(12).toList();
+          _voicePhrases = phrasesFromDb.take(6).toList();
         });
         debugPrint(
           '[Register] 🎤 Frases cargadas de BD local: ${_voicePhrases.length} frases',
@@ -1246,7 +1246,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 : '📴 Registro guardado localmente (se sincronizará con conexión)',
           ),
           backgroundColor: _isOnline ? Colors.green : Colors.orange,
-          duration: Duration(seconds: 3),
+          duration: Duration(seconds: 4),
         ),
       );
 
@@ -1797,10 +1797,10 @@ class _RegisterScreenState extends State<RegisterScreen>
                       Expanded(
                         child: Text(
                           isRecordingThisAudio
-                              ? '🎤 GRABANDO - Di las frases:'
+                              ? '🎤 GRABANDO - Di la frase:'
                               : (hasAudio
-                                    ? '✅ Frases grabadas:'
-                                    : '📝 Di estas 2 frases:'),
+                                    ? '✅ Frase grabada:'
+                                    : '📝 Di esta frase:'),
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -1815,7 +1815,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // 🎤 FRASE 1 de 2
+                  // 🎤 FRASE
                   Text(
                     '1️⃣ "${_voicePhrases[index * 2]}"',
                     style: TextStyle(
@@ -1830,20 +1830,6 @@ class _RegisterScreenState extends State<RegisterScreen>
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // 🎤 FRASE 2 de 2
-                  Text(
-                    '2️⃣ "${_voicePhrases[index * 2 + 1]}"',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontStyle: FontStyle.italic,
-                      fontWeight: FontWeight.w600,
-                      color: isRecordingThisAudio
-                          ? Colors.red.shade800
-                          : (hasAudio
-                                ? Colors.green.shade800
-                                : Colors.amber.shade900),
-                    ),
-                  ),
                 ],
               ),
             ),
