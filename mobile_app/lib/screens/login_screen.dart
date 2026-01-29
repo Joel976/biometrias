@@ -279,7 +279,7 @@ class _LoginScreenState extends State<LoginScreen> {
         print('[Login] 🌐 Obteniendo 2 frases aleatorias del backend...');
 
         // Cargar 2 frases diferentes
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 1; i++) {
           final phraseData = await backendService.obtenerFraseAleatoria();
           _voicePhrases.add(phraseData['frase']);
           _voicePhraseIds.add(phraseData['id_texto'] ?? phraseData['id']);
@@ -346,7 +346,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ];
 
         // Cargar 2 frases diferentes
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 1; i++) {
           final phraseData = await nativeService.obtenerFraseAleatoria();
 
           if (phraseData.containsKey('error')) {
@@ -1582,11 +1582,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                 children: [
                                   CircularProgressIndicator(),
                                   SizedBox(height: 8),
-                                  Text('Cargando frases...'),
+                                  Text('Cargando frase...'),
                                 ],
                               ),
                             )
-                          else if (_voicePhrases.length == 2)
+                          else if (_voicePhrases.isNotEmpty)
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
@@ -1608,7 +1608,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       SizedBox(width: 8),
                                       Text(
-                                        'Di las siguientes 2 frases:',
+                                        'Di la siguientes frase:',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
@@ -1645,32 +1645,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ],
                                   ),
                                   const SizedBox(height: 8),
-                                  // Frase 2
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        '2. ',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.blue,
-                                        ),
-                                      ),
-                                      Expanded(
-                                        child: Text(
-                                          '"${_voicePhrases[1]}"',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            fontStyle: FontStyle.italic,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                                 ],
                               ),
                             )
